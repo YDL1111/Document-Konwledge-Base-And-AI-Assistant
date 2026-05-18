@@ -6,6 +6,8 @@ import com.docbase.common.core.page.PageDTO;
 import com.docbase.domain.ai.audit.AiAuditApplicationService;
 import com.docbase.domain.ai.audit.dto.AiAuditLogDTO;
 import com.docbase.domain.ai.audit.query.AiAuditLogQuery;
+import com.docbase.infrastructure.user.AuthenticationUtils;
+import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,14 @@ public class AiAuditController extends BaseController {
     @PreAuthorize("@permission.has('ai:audit:list')")
     @GetMapping
     public ResponseDTO<PageDTO<AiAuditLogDTO>> list(AiAuditLogQuery query) {
+        restrictToCurrentUserIfNeeded(query);
         return ResponseDTO.ok(aiAuditApplicationService.getAuditLogList(query));
+    }
+
+    private void restrictToCurrentUserIfNeeded(AiAuditLogQuery query) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        if (!loginUser.isAdmin()) {
+            query.setUserId(loginUser.getUserId());
+        }
     }
 }

@@ -3,78 +3,70 @@ import { store } from "@/store";
 import { userType } from "./types";
 import { routerArrays } from "@/layout/types";
 import { router, resetRouter } from "@/router";
-import { storageSession } from "@pureadmin/utils";
+import { storageLocal, storageSession } from "@pureadmin/utils";
 import { useMultiTagsStoreHook } from "@/store/modules/multiTags";
 import { removeToken, sessionKey } from "@/utils/auth";
-import { DictionaryData, TokenDTO } from "@/api/common/login";
-import { storageLocal } from "@pureadmin/utils";
+import { CurrentUserInfoDTO, DictionaryData, TokenDTO } from "@/api/common/login";
 
 const dictionaryListKey = "ag-dictionary-list";
 const dictionaryMapKey = "ag-dictionary-map";
 
+type DictionaryListMap = Map<string, Array<DictionaryData>>;
+type DictionaryRecordMap = Record<string, Record<string, DictionaryData>>;
+
+function getStoredToken() {
+  return storageSession().getItem<TokenDTO>(sessionKey);
+}
+
 export const useUserStore = defineStore({
   id: "ag-user",
   state: (): userType => ({
-    // 用户名
-    username:
-      storageSession().getItem<TokenDTO>(sessionKey)?.currentUser.userInfo
-        .username ?? "",
-    // 页面级别权限
-    roles: storageSession().getItem<TokenDTO>(sessionKey)?.currentUser.roleKey
-      ? [storageSession().getItem<TokenDTO>(sessionKey)?.currentUser.roleKey]
+    username: getStoredToken()?.currentUser.userInfo.username ?? "",
+    roles: getStoredToken()?.currentUser.roleKey
+      ? [getStoredToken()?.currentUser.roleKey]
       : [],
     dictionaryList:
-      storageLocal().getItem<Map<String, Array<DictionaryData>>>(
-        dictionaryListKey
-      ) ?? new Map(),
+      storageLocal().getItem<DictionaryListMap>(dictionaryListKey) ?? new Map(),
     dictionaryMap:
-      storageLocal().getItem<Map<String, Map<String, DictionaryData>>>(
-        dictionaryMapKey
-      ) ?? new Map(),
-    currentUserInfo:
-      storageSession().getItem<TokenDTO>(sessionKey)?.currentUser.userInfo ?? {}
+      storageLocal().getItem<DictionaryRecordMap>(dictionaryMapKey) ?? {},
+    currentUserInfo: getStoredToken()?.currentUser.userInfo ?? {}
   }),
   actions: {
-    /** 存储用户名 */
     SET_USERNAME(username: string) {
-      /** TODO 这里不是应该再进一步存到sessionStorage中吗 */
       this.username = username;
     },
-    /** 存储角色 */
     SET_ROLES(roles: Array<string>) {
       this.roles = roles;
     },
-    /** 存储系统内的字典值 并拆分为Map形式和List形式 */
-    SET_DICTIONARY(dictionary: Map<String, Array<DictionaryData>>) {
-      /** 由于localStorage不能存储Map对象,所以用Obj来装载数据 */
-      const dictionaryMapTmp = {};
+    SET_CURRENT_USER_INFO(userInfo: CurrentUserInfoDTO) {
+      this.currentUserInfo = userInfo;
+    },
+    SET_DICTIONARY(dictionary: DictionaryListMap) {
+      const dictionaryMapTmp: DictionaryRecordMap = {};
 
-      for (const obj in dictionary) {
-        dictionaryMapTmp[obj] = dictionary[obj].reduce((map, dict) => {
-          map[dict.value] = dict;
-          return map;
-        }, {});
+      for (const [dictType, list] of dictionary.entries()) {
+        dictionaryMapTmp[dictType] = list.reduce<Record<string, DictionaryData>>(
+          (map, dict) => {
+            map[dict.value] = dict;
+            return map;
+          },
+          {}
+        );
       }
 
-      /** 将字典分成List形式和Map形式 List便于下拉框展示 Map便于匹配值 */
       this.dictionaryList = dictionary;
       this.dictionaryMap = dictionaryMapTmp;
 
-      storageLocal().setItem<Map<String, Array<DictionaryData>>>(
-        dictionaryListKey,
-        dictionary
-      );
-
-      storageLocal().setItem<Map<String, Map<String, DictionaryData>>>(
+      storageLocal().setItem<DictionaryListMap>(dictionaryListKey, dictionary);
+      storageLocal().setItem<DictionaryRecordMap>(
         dictionaryMapKey,
-        dictionaryMapTmp as Map<String, Map<String, DictionaryData>>
+        dictionaryMapTmp
       );
     },
-
-    /** 前端登出（不调用接口） */
     logOut() {
       this.username = "";
       this.roles = [];
+      this.currentUserInfo = {};
       removeToken();
       useMultiTagsStoreHook().handleTags("equal", [...routerArrays]);
       resetRouter();

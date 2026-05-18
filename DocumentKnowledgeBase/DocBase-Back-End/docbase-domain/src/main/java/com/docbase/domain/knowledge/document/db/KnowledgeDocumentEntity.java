@@ -49,6 +49,9 @@ public class KnowledgeDocumentEntity extends BaseEntity<KnowledgeDocumentEntity>
     @TableField("current_version_no")
     private String currentVersionNo;
 
+    @TableField("audit_remark")
+    private String auditRemark;
+
     @Override
     public Serializable pkVal() {
         return this.documentId;

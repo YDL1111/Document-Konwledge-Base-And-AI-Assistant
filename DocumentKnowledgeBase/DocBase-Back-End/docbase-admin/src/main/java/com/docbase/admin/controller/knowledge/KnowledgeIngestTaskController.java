@@ -6,6 +6,8 @@ import com.docbase.common.core.page.PageDTO;
 import com.docbase.domain.knowledge.ingest.KnowledgeIngestTaskApplicationService;
 import com.docbase.domain.knowledge.ingest.dto.KnowledgeIngestTaskDTO;
 import com.docbase.domain.knowledge.ingest.query.KnowledgeIngestTaskQuery;
+import com.docbase.infrastructure.user.AuthenticationUtils;
+import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,14 @@ public class KnowledgeIngestTaskController extends BaseController {
     @PreAuthorize("@permission.has('knowledge:ingest:list')")
     @GetMapping
     public ResponseDTO<PageDTO<KnowledgeIngestTaskDTO>> list(KnowledgeIngestTaskQuery query) {
+        restrictToCurrentUserIfNeeded(query);
         return ResponseDTO.ok(knowledgeIngestTaskApplicationService.getTaskList(query));
+    }
+
+    private void restrictToCurrentUserIfNeeded(KnowledgeIngestTaskQuery query) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        if (!loginUser.isAdmin()) {
+            query.setCreatorId(loginUser.getUserId());
+        }
     }
 }

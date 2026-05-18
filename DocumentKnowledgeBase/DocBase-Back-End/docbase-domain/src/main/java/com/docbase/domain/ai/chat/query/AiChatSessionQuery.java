@@ -13,12 +13,14 @@ public class AiChatSessionQuery extends AbstractPageQuery<AiChatSessionEntity> {
 
     private String sessionTitle;
     private Integer status;
+    private Long userId;
 
     @Override
     public QueryWrapper<AiChatSessionEntity> addQueryCondition() {
         return new QueryWrapper<AiChatSessionEntity>()
             .like(StrUtil.isNotBlank(sessionTitle), "session_title", sessionTitle)
             .eq(status != null, "status", status)
+            .eq(userId != null, "user_id", userId)
             .orderByDesc("last_message_time");
     }
 }

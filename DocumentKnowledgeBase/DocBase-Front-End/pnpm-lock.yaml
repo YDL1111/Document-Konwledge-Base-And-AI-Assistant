@@ -83,6 +83,9 @@ importers:
       sortablejs:
         specifier: ^1.15.0
         version: 1.15.7
+      tippy.js:
+        specifier: ^6.3.7
+        version: 6.3.7
       typeit:
         specifier: ^8.7.1
         version: 8.8.7

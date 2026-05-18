@@ -6,6 +6,8 @@ import com.docbase.common.core.page.PageDTO;
 import com.docbase.domain.ai.chat.AiChatApplicationService;
 import com.docbase.domain.ai.chat.dto.AiChatSessionDTO;
 import com.docbase.domain.ai.chat.query.AiChatSessionQuery;
+import com.docbase.infrastructure.user.AuthenticationUtils;
+import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,14 @@ public class AiChatController extends BaseController {
     @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping
     public ResponseDTO<PageDTO<AiChatSessionDTO>> list(AiChatSessionQuery query) {
+        restrictToCurrentUserIfNeeded(query);
         return ResponseDTO.ok(aiChatApplicationService.getSessionList(query));
+    }
+
+    private void restrictToCurrentUserIfNeeded(AiChatSessionQuery query) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        if (!loginUser.isAdmin()) {
+            query.setUserId(loginUser.getUserId());
+        }
     }
 }

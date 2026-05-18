@@ -40,6 +40,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class LoginController {
 
+    private static final Long DEFAULT_REGISTER_ROLE_ID = 2L;
+
+    private static final Long DEFAULT_REGISTER_DEPT_ID = 2L;
+
     private final LoginService loginService;
 
     private final MenuApplicationService menuApplicationService;
@@ -142,6 +146,12 @@ public class LoginController {
         }
         if (command.getStatus() == null) {
             command.setStatus(1);
+        }
+        if (command.getRoleId() == null) {
+            command.setRoleId(DEFAULT_REGISTER_ROLE_ID);
+        }
+        if (command.getDeptId() == null) {
+            command.setDeptId(DEFAULT_REGISTER_DEPT_ID);
         }
         if (command.getRemark() == null || command.getRemark().isBlank()) {
             command.setRemark("self-register");

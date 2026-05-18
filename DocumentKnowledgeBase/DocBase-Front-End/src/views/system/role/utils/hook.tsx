@@ -1,16 +1,11 @@
 import dayjs from "dayjs";
-import { message } from "@/utils/message";
-import {
-  deleteRoleApi,
-  getRoleListApi,
-  RoleDTO,
-  RoleQuery
-} from "@/api/system/role";
-import { getMenuListApi, MenuDTO } from "@/api/system/menu";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { usePublicHooks } from "../../hooks";
-import { type PaginationProps } from "@pureadmin/table";
 import { onMounted, reactive, ref, toRaw } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { PaginationProps } from "@pureadmin/table";
+import { deleteRoleApi, getRoleListApi, type RoleDTO, type RoleQuery } from "@/api/system/role";
+import { getMenuListApi, type MenuDTO } from "@/api/system/menu";
+import { usePublicHooks } from "../../hooks";
+import { message } from "@/utils/message";
 import { toTree } from "@/utils/tree";
 
 export function useRole() {
@@ -19,9 +14,10 @@ export function useRole() {
     roleName: "",
     status: undefined
   });
-  const dataList = ref([]);
+
+  const dataList = ref<RoleDTO[]>([]);
   const loading = ref(true);
-  const switchLoadMap = ref({});
+  const switchLoadMap = ref<Record<number, { loading: boolean }>>({});
   const { switchStyle } = usePublicHooks();
   const pagination = reactive<PaginationProps>({
     total: 0,
@@ -29,22 +25,12 @@ export function useRole() {
     currentPage: 1,
     background: true
   });
+  const multipleSelection = ref<RoleDTO[]>([]);
+
   const columns: TableColumnList = [
-    {
-      label: "角色编号",
-      prop: "roleId",
-      minWidth: 100
-    },
-    {
-      label: "角色名称",
-      prop: "roleName",
-      minWidth: 120
-    },
-    {
-      label: "角色标识",
-      prop: "roleKey",
-      minWidth: 150
-    },
+    { label: "角色ID", prop: "roleId", minWidth: 100 },
+    { label: "角色名称", prop: "roleName", minWidth: 120 },
+    { label: "角色权限字符", prop: "roleKey", minWidth: 150 },
     {
       label: "状态",
       minWidth: 130,
@@ -55,19 +41,15 @@ export function useRole() {
           v-model={scope.row.status}
           active-value={1}
           inactive-value={0}
-          active-text="已启用"
-          inactive-text="已停用"
+          active-text="启用"
+          inactive-text="停用"
           inline-prompt
           style={switchStyle.value}
           onChange={() => onChange(scope as any)}
         />
       )
     },
-    {
-      label: "备注",
-      prop: "remark",
-      minWidth: 150
-    },
+    { label: "备注", prop: "remark", minWidth: 150 },
     {
       label: "创建时间",
       minWidth: 180,
@@ -75,56 +57,25 @@ export function useRole() {
       formatter: ({ createTime }) =>
         dayjs(createTime).format("YYYY-MM-DD HH:mm:ss")
     },
-    {
-      label: "操作",
-      fixed: "right",
-      width: 240,
-      slot: "operation"
-    }
+    { label: "操作", fixed: "right", width: 240, slot: "operation" }
   ];
-  // const buttonClass = computed(() => {
-  //   return [
-  //     "!h-[20px]",
-  //     "reset-margin",
-  //     "!text-gray-500",
-  //     "dark:!text-white",
-  //     "dark:hover:!text-primary"
-  //   ];
-  // });
 
   function onChange({ row, index }) {
     ElMessageBox.confirm(
-      `确认要<strong>${
-        row.status === 0 ? "停用" : "启用"
-      }</strong><strong style='color:var(--el-color-primary)'>${
-        row.roleName
-      }</strong>吗?`,
+      `确认要${row.status === 0 ? "停用" : "启用"}角色“${row.roleName}”吗？`,
       "系统提示",
       {
-        confirmButtonText: "确定",
+        confirmButtonText: "确认",
         cancelButtonText: "取消",
         type: "warning",
-        dangerouslyUseHTMLString: true,
         draggable: true
       }
     )
       .then(() => {
-        switchLoadMap.value[index] = Object.assign(
-          {},
-          switchLoadMap.value[index],
-          {
-            loading: true
-          }
-        );
+        switchLoadMap.value[index] = { loading: true };
         setTimeout(() => {
-          switchLoadMap.value[index] = Object.assign(
-            {},
-            switchLoadMap.value[index],
-            {
-              loading: false
-            }
-          );
-          message(`已${row.status === 0 ? "停用" : "启用"}${row.roleName}`, {
+          switchLoadMap.value[index] = { loading: false };
+          message(`${row.status === 0 ? "停用" : "启用"} ${row.roleName} 成功`, {
             type: "success"
           });
         }, 300);
@@ -138,7 +89,7 @@ export function useRole() {
     try {
       loading.value = true;
       await deleteRoleApi(row.roleId);
-      message(`您删除了角色名称为${row.roleName}的这条数据`, { type: "info" });
+      message(`删除角色 ${row.roleName} 成功`, { type: "info" });
       onSearch();
     } catch (e) {
       console.error(e);
@@ -152,12 +103,11 @@ export function useRole() {
     try {
       loading.value = true;
       const { data } = await getRoleListApi(toRaw(form));
-      console.log("role list", data);
-      dataList.value = data.rows;
-      pagination.total = data.total;
+      dataList.value = data.rows ?? [];
+      pagination.total = data.total ?? 0;
     } catch (e) {
       console.error(e);
-      ElMessage.error((e as Error)?.message || "加载失败");
+      ElMessage.error((e as Error)?.message || "角色列表加载失败");
     } finally {
       loading.value = false;
     }
@@ -169,21 +119,31 @@ export function useRole() {
     onSearch();
   };
 
+  function handleSelectionChange(rows: RoleDTO[]) {
+    multipleSelection.value = rows;
+  }
+
+  function handleSizeChange(pageSize: number) {
+    pagination.pageSize = pageSize;
+    pagination.currentPage = 1;
+    onSearch();
+  }
+
+  function handleCurrentChange(currentPage: number) {
+    pagination.currentPage = currentPage;
+    onSearch();
+  }
+
   const menuTree = ref<MenuDTO[]>([]);
 
-  /** 菜单权限 */
   async function getMenuTree() {
     if (menuTree.value?.length) {
       return menuTree.value;
     }
     const { data } = await getMenuListApi({ isButton: false });
-    console.log("menu data", data);
     menuTree.value = toTree(data, "id", "parentId");
     return menuTree.value;
   }
-
-  /** 数据权限 可自行开发 */
-  // function handleDatabase() {}
 
   onMounted(onSearch);
 
@@ -197,6 +157,9 @@ export function useRole() {
     resetForm,
     menuTree,
     getMenuTree,
-    handleDelete
+    handleDelete,
+    handleSelectionChange,
+    handleSizeChange,
+    handleCurrentChange
   };
 }

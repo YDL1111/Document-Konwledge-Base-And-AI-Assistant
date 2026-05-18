@@ -4,21 +4,25 @@ import { formatBytes } from "@pureadmin/utils";
 import { ref } from "vue";
 import { uploadUserAvatarApi } from "@/api/system/user";
 import { useUserStoreHook } from "@/store/modules/user";
-// import * as userApi from "@/api/system/userApi";
 import { message } from "@/utils/message";
+import type { CurrentUserInfoDTO } from "@/api/common/login";
 
-const currentUser = useUserStoreHook().currentUserInfo;
+defineProps<{
+  user?: CurrentUserInfoDTO;
+}>();
+
+const currentUser = (useUserStoreHook().currentUserInfo ??
+  {}) as CurrentUserInfoDTO;
 
 const infos = ref();
 const imgBlob = ref();
 const refCropper = ref();
 const showPopover = ref(false);
-const cropperImg = ref<string>("");
-
-cropperImg.value = import.meta.env.VITE_APP_BASE_API + currentUser.avatar;
+const cropperImg = ref<string>(
+  currentUser.avatar ? import.meta.env.VITE_APP_BASE_API + currentUser.avatar : ""
+);
 
 function onCropper({ base64, blob, info }) {
-  console.log(blob);
   infos.value = info;
   imgBlob.value = blob;
   cropperImg.value = base64;
@@ -27,36 +31,26 @@ function onCropper({ base64, blob, info }) {
 const open = ref(false);
 const visible = ref(false);
 
-// 图片裁剪数据
-// const options = reactive({
-//   img: avatarUrl, // 裁剪图片的地址
-//   autoCrop: true, // 是否默认生成截图框
-//   autoCropWidth: 200, // 默认生成截图框宽度
-//   autoCropHeight: 200, // 默认生成截图框高度
-//   fixedBox: true, // 固定截图框大小 不允许改变
-//   previews: {} // 预览数据
-// });
-
-/** 上传图片 */
 function uploadImg() {
   const formData = new FormData();
   formData.append("avatarfile", imgBlob.value);
   uploadUserAvatarApi(formData).then(() => {
     open.value = false;
-    message("上传图片成功", {
+    message("上传头像成功", {
       type: "success"
     });
     visible.value = false;
   });
 }
 </script>
+
 <template>
   <div class="user-info-head" @click="open = true">
     <el-avatar :size="120" :src="cropperImg" />
   </div>
   <el-dialog
-    title="修改头像"
     v-model="open"
+    title="修改头像"
     width="900px"
     append-to-body
     @opened="visible = true"
@@ -65,7 +59,7 @@ function uploadImg() {
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span class="font-medium"> 右键下面左侧裁剪区开启功能菜单 </span>
+          <span class="font-medium">右键头像可打开裁剪操作菜单</span>
         </div>
       </template>
       <el-popover
@@ -84,7 +78,7 @@ function uploadImg() {
             @readied="showPopover = true"
           />
         </template>
-        <div class="flex flex-wrap justify-center items-center text-center">
+        <div class="flex flex-wrap items-center justify-center text-center">
           <el-image
             v-if="cropperImg"
             :src="cropperImg"
@@ -93,8 +87,8 @@ function uploadImg() {
           />
           <div v-if="infos" class="mt-1">
             <p>
-              图像大小：{{ parseInt(infos.width) }} ×
-              {{ parseInt(infos.height) }}像素
+              图像尺寸：{{ parseInt(infos.width) }} x
+              {{ parseInt(infos.height) }} 像素
             </p>
             <p>
               文件大小：{{ formatBytes(infos.size) }}（{{ infos.size }} 字节）

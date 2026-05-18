@@ -75,6 +75,7 @@ export interface LoginLogQuery extends BasePageQuery {
 export interface LoginLogsDTO {
   browser?: string;
   infoId?: string;
+  logId?: number;
   ipAddress?: string;
   loginLocation?: string;
   loginTime?: Date;

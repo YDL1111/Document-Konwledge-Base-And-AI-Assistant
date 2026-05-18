@@ -3,7 +3,7 @@ export default {
   redirect: "/global/user/profile",
   meta: {
     icon: "checkboxCircleLine",
-    title: "首页",
+    title: "个人中心",
     rank: 0,
     showLink: false
   },

@@ -14,6 +14,7 @@ public class KnowledgeIngestTaskQuery extends AbstractPageQuery<KnowledgeIngestT
     private String taskNo;
     private Integer status;
     private Long documentId;
+    private Long creatorId;
 
     @Override
     public QueryWrapper<KnowledgeIngestTaskEntity> addQueryCondition() {
@@ -21,6 +22,7 @@ public class KnowledgeIngestTaskQuery extends AbstractPageQuery<KnowledgeIngestT
             .like(StrUtil.isNotBlank(taskNo), "task_no", taskNo)
             .eq(status != null, "status", status)
             .eq(documentId != null, "document_id", documentId)
+            .eq(creatorId != null, "creator_id", creatorId)
             .orderByDesc("create_time");
     }
 }

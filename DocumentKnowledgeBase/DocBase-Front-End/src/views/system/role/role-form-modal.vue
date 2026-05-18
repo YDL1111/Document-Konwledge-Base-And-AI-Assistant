@@ -2,15 +2,15 @@
 import VDialog from "@/components/VDialog/VDialog.vue";
 import { computed, reactive, ref } from "vue";
 import { useUserStoreHook } from "@/store/modules/user";
-import { ElMessage, FormInstance, FormRules } from "element-plus";
+import { ElMessage, type FormInstance, type FormRules, type ElTree } from "element-plus";
 import {
-  AddRoleCommand,
-  RoleDTO,
-  UpdateRoleCommand,
   addRoleApi,
-  updateRoleApi
+  updateRoleApi,
+  type AddRoleCommand,
+  type RoleDTO,
+  type UpdateRoleCommand
 } from "@/api/system/role";
-import { MenuDTO } from "@/api/system/menu";
+import type { MenuDTO } from "@/api/system/menu";
 
 interface Props {
   type: "add" | "update";
@@ -40,54 +40,51 @@ const formData = reactive<AddRoleCommand | UpdateRoleCommand>({
   roleKey: "",
   roleName: "",
   roleSort: 1,
-  status: ""
+  status: "1"
 });
 
-const statusList = useUserStoreHook().dictionaryMap["common.status"];
+const statusList = useUserStoreHook().dictionaryMap["common.status"] ?? {};
 
 const rules: FormRules = {
-  roleName: [
-    {
-      required: true,
-      message: "角色名称不能为空"
-    }
-  ],
-  roleKey: [
-    {
-      required: true,
-      message: "权限标识不能为空"
-    }
-  ],
-  roleSort: [
-    {
-      required: true,
-      message: "角色序号不能为空"
-    }
-  ]
+  roleName: [{ required: true, message: "角色名称不能为空" }],
+  roleKey: [{ required: true, message: "角色权限字符不能为空" }],
+  roleSort: [{ required: true, message: "角色排序不能为空" }]
 };
+
 const formRef = ref<FormInstance>();
+const treeRef = ref<InstanceType<typeof ElTree>>();
+
 function handleOpened() {
-  console.log("opened", props.row);
   if (props.row) {
     Object.assign(formData, props.row);
-    formData.menuIds = props.row.selectedMenuList;
+    formData.menuIds = props.row.selectedMenuList ?? [];
   } else {
+    Object.assign(formData, {
+      roleId: 0,
+      dataScope: "",
+      menuIds: [],
+      remark: "",
+      roleKey: "",
+      roleName: "",
+      roleSort: 1,
+      status: "1"
+    });
     formRef.value?.resetFields();
   }
 }
 
-const treeRef = ref<InstanceType<typeof ElTree>>();
 function handleCheckChange() {
-  formData.menuIds = treeRef.value.getCheckedKeys(false) as number[];
+  formData.menuIds = ((treeRef.value?.getCheckedKeys(false) ?? []) as number[]);
 }
 
 const loading = ref(false);
+
 async function handleConfirm() {
   try {
     loading.value = true;
     if (props.type === "add") {
-      await addRoleApi(formData);
-    } else if (props.type === "update") {
+      await addRoleApi(formData as AddRoleCommand);
+    } else {
       await updateRoleApi(formData as UpdateRoleCommand);
     }
     ElMessage.info("提交成功");
@@ -107,21 +104,21 @@ async function handleConfirm() {
     show-full-screen
     fixed-body-height
     use-body-scrolling
-    :title="type === 'add' ? '新增角色' : '更新角色'"
+    :title="type === 'add' ? '新增角色' : '修改角色'"
     v-model="visible"
     :loading="loading"
     @confirm="handleConfirm"
     @cancel="visible = false"
     @opened="handleOpened"
   >
-    <el-form :model="formData" label-width="120px" :rules="rules" ref="formRef">
+    <el-form ref="formRef" :model="formData" label-width="120px" :rules="rules">
       <el-form-item prop="roleName" label="角色名称" required inline-message>
         <el-input v-model="formData.roleName" />
       </el-form-item>
       <el-form-item prop="roleKey" label="权限字符" required>
         <el-input v-model="formData.roleKey" />
       </el-form-item>
-      <el-form-item prop="roleSort" label="角色顺序" required>
+      <el-form-item prop="roleSort" label="角色排序" required>
         <el-input-number :min="1" v-model="formData.roleSort" />
       </el-form-item>
       <el-form-item prop="status" label="角色状态">
@@ -129,9 +126,10 @@ async function handleConfirm() {
           <el-radio
             v-for="item in Object.keys(statusList)"
             :key="item"
-            :label="statusList[item].value"
-            >{{ statusList[item].label }}</el-radio
+            :label="String(statusList[item].value)"
           >
+            {{ statusList[item].label }}
+          </el-radio>
         </el-radio-group>
       </el-form-item>
       <el-form-item label="菜单权限" prop="menuIds">

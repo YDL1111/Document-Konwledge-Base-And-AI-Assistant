@@ -9,7 +9,7 @@ export type CaptchaDTO = {
 export type ConfigDTO = {
   isCaptchaOn: boolean;
   isRegisterEnabled: boolean;
-  dictionary: Map<String, Array<DictionaryData>>;
+  dictionary: Map<string, Array<DictionaryData>>;
 };
 
 export type LoginByPasswordDTO = {

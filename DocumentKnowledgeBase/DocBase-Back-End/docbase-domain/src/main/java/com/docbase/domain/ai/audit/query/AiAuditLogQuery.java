@@ -13,12 +13,14 @@ public class AiAuditLogQuery extends AbstractPageQuery<AiAuditLogEntity> {
 
     private String questionText;
     private Integer resultStatus;
+    private Long userId;
 
     @Override
     public QueryWrapper<AiAuditLogEntity> addQueryCondition() {
         return new QueryWrapper<AiAuditLogEntity>()
             .like(StrUtil.isNotBlank(questionText), "question_text", questionText)
             .eq(resultStatus != null, "result_status", resultStatus)
+            .eq(userId != null, "user_id", userId)
             .orderByDesc("create_time");
     }
 }

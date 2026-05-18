@@ -6,6 +6,7 @@ import { isAllEmpty } from "@pureadmin/utils";
 import { ref, nextTick, computed } from "vue";
 import { useNav } from "@/layout/hooks/useNav";
 import { usePermissionStoreHook } from "@/store/modules/permission";
+import User from "@iconify-icons/ri/user-3-line";
 import LogoutCircleRLine from "@iconify-icons/ri/logout-circle-r-line";
 import Setting from "@iconify-icons/ri/settings-3-line";
 
@@ -15,6 +16,7 @@ const {
   route,
   title,
   logout,
+  userProfile,
   backTopMenu,
   onPanel,
   username,
@@ -67,6 +69,10 @@ nextTick(() => {
         </span>
         <template #dropdown>
           <el-dropdown-menu class="logout">
+            <el-dropdown-item @click="userProfile">
+              <IconifyIconOffline :icon="User" style="margin: 5px" />
+              个人中心
+            </el-dropdown-item>
             <el-dropdown-item @click="logout">
               <IconifyIconOffline
                 :icon="LogoutCircleRLine"

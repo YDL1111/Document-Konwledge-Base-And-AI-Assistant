@@ -1,29 +1,27 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { useOperationLogHook } from "./utils/hook";
+import { computed, ref } from "vue";
 import { PureTableBar } from "@/components/RePureTableBar";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
-
-import Delete from "@iconify-icons/ep/delete";
-import View from "@iconify-icons/ep/view";
-import Search from "@iconify-icons/ep/search";
-import Refresh from "@iconify-icons/ep/refresh";
 import { useUserStoreHook } from "@/store/modules/user";
-// TODO 这个导入声明好长  看看如何优化
-import { CommonUtils } from "../../../../utils/common";
+import { CommonUtils } from "@/utils/common";
+import Delete from "@iconify-icons/ep/delete";
+import Refresh from "@iconify-icons/ep/refresh";
+import Search from "@iconify-icons/ep/search";
+import View from "@iconify-icons/ep/view";
+import { useOperationLogHook } from "./utils/hook";
 
-/** 组件name最好和菜单表中的router_name一致 */
 defineOptions({
   name: "SystemOperationLog"
 });
 
 const businessTypeList =
-  useUserStoreHook().dictionaryList["sysOperationLog.businessType"];
+  useUserStoreHook().dictionaryList["sysOperationLog.businessType"] ?? [];
 const operationStatusList =
-  useUserStoreHook().dictionaryList["sysOperationLog.status"];
-const tableRef = ref();
+  useUserStoreHook().dictionaryList["sysOperationLog.status"] ?? [];
 
+const tableRef = ref();
 const searchFormRef = ref();
+
 const {
   searchFormParams,
   pageLoading,
@@ -32,39 +30,46 @@ const {
   pagination,
   timeRange,
   defaultSort,
-  multipleSelection,
   onSearch,
   resetForm,
   exportAllExcel,
   openDialog,
-  getOperationLogList,
   handleDelete,
-  handleBulkDelete
+  handleBulkDelete,
+  handleSelectionChange,
+  handlePageSizeChange,
+  handlePageCurrentChange,
+  handleSortChange
 } = useOperationLogHook();
+
+const timeRangeModel = computed({
+  get: () => timeRange.value as any,
+  set: value => {
+    timeRange.value = (value ?? []) as any;
+  }
+});
 </script>
 
 <template>
   <div class="main">
-    <!-- 搜索栏 -->
     <el-form
       ref="searchFormRef"
       :inline="true"
       :model="searchFormParams"
       class="search-form bg-bg_color w-[99/100] pl-8 pt-[12px]"
     >
-      <el-form-item label="系统模块：" prop="requestModule">
+      <el-form-item label="业务模块" prop="requestModule">
         <el-input
           v-model="searchFormParams.requestModule"
-          placeholder="请输入系统模块"
+          placeholder="请输入业务模块"
           clearable
           class="!w-[200px]"
         />
       </el-form-item>
-
-      <el-form-item label="操作类型：" prop="businessType">
+      <el-form-item label="业务类型" prop="businessType">
         <el-select
           v-model="searchFormParams.businessType"
-          placeholder="请选择状态"
+          placeholder="请选择业务类型"
           clearable
           class="!w-[180px]"
         >
@@ -76,15 +81,15 @@ const {
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="操作人员：" prop="username">
+      <el-form-item label="操作人" prop="username">
         <el-input
           v-model="searchFormParams.username"
-          placeholder="请输入创建者"
+          placeholder="请输入操作人"
           clearable
           class="!w-[180px]"
         />
       </el-form-item>
-      <el-form-item label="状态：" prop="status">
+      <el-form-item label="状态" prop="status">
         <el-select
           v-model="searchFormParams.status"
           placeholder="请选择状态"
@@ -100,13 +105,10 @@ const {
         </el-select>
       </el-form-item>
       <el-form-item>
-        <label class="el-form-item__label is-required font-bold"
-          >操作时间：</label
-        >
-        <!-- TODO 如何消除这个v-model的warning -->
+        <label class="el-form-item__label font-bold">操作时间</label>
         <el-date-picker
+          v-model="timeRangeModel"
           class="!w-[240px]"
-          v-model="timeRange"
           value-format="YYYY-MM-DD"
           type="daterange"
           range-separator="-"
@@ -121,7 +123,7 @@ const {
           :loading="pageLoading"
           @click="onSearch"
         >
-          搜索
+          查询
         </el-button>
         <el-button
           :icon="useRenderIcon(Refresh)"
@@ -132,9 +134,7 @@ const {
       </el-form-item>
     </el-form>
 
-    <!-- table bar 包裹  table -->
-    <PureTableBar title="操作日志列表" :columns="columns" @refresh="onSearch">
-      <!-- 表格操作栏 -->
+    <PureTableBar title="操作日志" :columns="columns" @refresh="onSearch">
       <template #buttons>
         <el-button
           type="danger"
@@ -145,15 +145,19 @@ const {
         </el-button>
         <el-button
           type="primary"
-          @click="CommonUtils.exportExcel(columns, dataList, '操作日志列表')"
-          >单页导出</el-button
+          @click="CommonUtils.exportExcel(columns, dataList, '操作日志')"
         >
-        <el-button type="primary" @click="exportAllExcel">全部导出</el-button>
+          导出当前页
+        </el-button>
+        <el-button type="primary" @click="() => exportAllExcel()">
+          导出全部
+        </el-button>
       </template>
-      <template v-slot="{ size, dynamicColumns }">
+
+      <template #default="{ size, dynamicColumns }">
         <pure-table
-          border
           ref="tableRef"
+          border
           align-whole="center"
           showOverflowTooltip
           table-layout="auto"
@@ -164,17 +168,15 @@ const {
           :columns="dynamicColumns"
           :default-sort="defaultSort"
           :pagination="pagination"
-          :paginationSmall="size === 'small' ? true : false"
+          :pagination-small="size === 'small'"
           :header-cell-style="{
             background: 'var(--el-table-row-hover-bg-color)',
             color: 'var(--el-text-color-primary)'
           }"
-          @page-size-change="getOperationLogList"
-          @page-current-change="getOperationLogList"
-          @sort-change="getOperationLogList"
-          @selection-change="
-            rows => (multipleSelection = rows.map(item => item.operationId))
-          "
+          @page-size-change="handlePageSizeChange"
+          @page-current-change="handlePageCurrentChange"
+          @sort-change="sort => handleSortChange(sort as any)"
+          @selection-change="handleSelectionChange"
         >
           <template #operation="{ row }">
             <el-button
@@ -188,7 +190,7 @@ const {
               详情
             </el-button>
             <el-popconfirm
-              :title="`是否确认删除编号为${row.operationId}的这条日志`"
+              :title="`确认删除操作日志 #${row.operationId} 吗？`"
               @confirm="handleDelete(row)"
             >
               <template #reference>
