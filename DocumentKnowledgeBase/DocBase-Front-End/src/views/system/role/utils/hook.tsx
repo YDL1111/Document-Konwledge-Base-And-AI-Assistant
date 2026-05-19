@@ -135,14 +135,25 @@ export function useRole() {
   }
 
   const menuTree = ref<MenuDTO[]>([]);
+  const menuButtonList = ref<MenuDTO[]>([]);
 
   async function getMenuTree() {
-    if (menuTree.value?.length) {
-      return menuTree.value;
+    if (menuTree.value?.length || menuButtonList.value?.length) {
+      return {
+        menuTree: menuTree.value,
+        menuButtonList: menuButtonList.value
+      };
     }
-    const { data } = await getMenuListApi({ isButton: false });
-    menuTree.value = toTree(data, "id", "parentId");
-    return menuTree.value;
+    const [menuResponse, buttonResponse] = await Promise.all([
+      getMenuListApi({ isButton: false }),
+      getMenuListApi({ isButton: true })
+    ]);
+    menuTree.value = toTree(menuResponse.data, "id", "parentId");
+    menuButtonList.value = buttonResponse.data ?? [];
+    return {
+      menuTree: menuTree.value,
+      menuButtonList: menuButtonList.value
+    };
   }
 
   onMounted(onSearch);
@@ -156,6 +167,7 @@ export function useRole() {
     onSearch,
     resetForm,
     menuTree,
+    menuButtonList,
     getMenuTree,
     handleDelete,
     handleSelectionChange,

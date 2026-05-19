@@ -6,6 +6,7 @@ import { CommonUtils } from "@/utils/common";
 import { message } from "@/utils/message";
 import { useUserStoreHook } from "@/store/modules/user";
 import {
+  cleanLoginLogApi,
   deleteLoginLogApi,
   exportLoginLogExcelApi,
   getLoginLogListApi,
@@ -173,6 +174,23 @@ export function useLoginLogHook() {
       });
   }
 
+  async function handleClean() {
+    try {
+      await ElMessageBox.confirm(
+        "确认清空全部登录日志吗？此操作不可恢复。",
+        "系统提示",
+        { confirmButtonText: "确认清空", cancelButtonText: "取消", type: "warning" }
+      );
+      await cleanLoginLogApi();
+      message("已清空全部登录日志", { type: "success" });
+      getLoginLogList();
+    } catch (e: any) {
+      if (e !== "cancel") {
+        message("清空失败", { type: "error" });
+      }
+    }
+  }
+
   onMounted(() => {
     getLoginLogList();
   });
@@ -191,6 +209,7 @@ export function useLoginLogHook() {
     exportAllExcel,
     getLoginLogList,
     handleDelete,
+    handleClean,
     handleBulkDelete,
     handleSelectionChange,
     handlePageSizeChange,

@@ -55,6 +55,9 @@ const detailData = ref<KnowledgeDocumentDetailDTO>();
 const auditTarget = ref<KnowledgeDocumentDTO>();
 
 const canAudit = computed(() => hasAuth("knowledge:document:audit"));
+const canUpload = computed(() => hasAuth("knowledge:document:upload"));
+const canPreview = computed(() => hasAuth("knowledge:document:preview"));
+const canDownload = computed(() => hasAuth("knowledge:document:download"));
 const isPendingAuditFilter = computed(() => searchForm.status === 2);
 
 const categoryTreeOptions = computed(() => {
@@ -107,8 +110,7 @@ const statusMap: Record<
 
 const visibilityMap: Record<number, string> = {
   1: "全员可见",
-  2: "本部门可见",
-  3: "仅本人可见"
+  2: "本部门可见"
 };
 
 const parseStatusMap: Record<number, string> = {
@@ -390,7 +392,9 @@ onMounted(() => {
             <el-button v-if="canAudit" plain @click="filterPendingAudit">
               待审核列表
             </el-button>
-            <el-button type="primary" @click="openAddDialog">新增文档</el-button>
+            <el-button v-if="canUpload" type="primary" @click="openAddDialog">
+              新增文档
+            </el-button>
           </div>
         </div>
       </template>
@@ -427,7 +431,6 @@ onMounted(() => {
           >
             <el-option label="全员可见" :value="1" />
             <el-option label="本部门可见" :value="2" />
-            <el-option label="仅本人可见" :value="3" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -472,6 +475,7 @@ onMounted(() => {
           </template>
         </el-table-column>
         <el-table-column prop="summary" label="摘要" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="creatorId" label="创建人ID" width="100" />
         <el-table-column prop="auditRemark" label="审核备注" min-width="180" show-overflow-tooltip />
         <el-table-column prop="updateTime" label="更新时间" min-width="180">
           <template #default="{ row }">
@@ -572,7 +576,6 @@ onMounted(() => {
           <el-select v-model="formModel.visibility" style="width: 100%">
             <el-option label="全员可见" :value="1" />
             <el-option label="本部门可见" :value="2" />
-            <el-option label="仅本人可见" :value="3" />
           </el-select>
         </el-form-item>
         <el-alert
@@ -626,6 +629,7 @@ onMounted(() => {
             <span>当前文档文件</span>
             <div class="section-actions">
               <el-button
+                v-if="canPreview"
                 type="primary"
                 plain
                 size="small"
@@ -635,6 +639,7 @@ onMounted(() => {
                 预览
               </el-button>
               <el-button
+                v-if="canDownload"
                 type="primary"
                 size="small"
                 :disabled="!detailData.currentVersion"

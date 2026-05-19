@@ -1,9 +1,11 @@
 package com.docbase.domain.knowledge.category.query;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.docbase.common.core.page.AbstractPageQuery;
 import com.docbase.domain.knowledge.category.db.KnowledgeCategoryEntity;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -15,6 +17,8 @@ public class KnowledgeCategoryQuery extends AbstractPageQuery<KnowledgeCategoryE
     private Integer status;
     private Long parentId;
     private Long deptId;
+    private List<Long> deptIdList;
+    private Long creatorId;
 
     @Override
     public QueryWrapper<KnowledgeCategoryEntity> addQueryCondition() {
@@ -23,6 +27,8 @@ public class KnowledgeCategoryQuery extends AbstractPageQuery<KnowledgeCategoryE
             .eq(status != null, "status", status)
             .eq(parentId != null, "parent_id", parentId)
             .eq(deptId != null, "dept_id", deptId)
+            .in(CollUtil.isNotEmpty(deptIdList), "dept_id", deptIdList)
+            .eq(creatorId != null, "creator_id", creatorId)
             .orderByAsc("sort_num")
             .orderByDesc("create_time");
     }

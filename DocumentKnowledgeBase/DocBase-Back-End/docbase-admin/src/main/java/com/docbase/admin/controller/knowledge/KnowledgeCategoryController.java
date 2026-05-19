@@ -1,6 +1,7 @@
 package com.docbase.admin.controller.knowledge;
 
 import com.docbase.admin.customize.aop.accessLog.AccessLog;
+import com.docbase.admin.customize.service.permission.KnowledgePermissionHelper;
 import com.docbase.common.core.base.BaseController;
 import com.docbase.common.core.dto.ResponseDTO;
 import com.docbase.common.core.page.PageDTO;
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KnowledgeCategoryController extends BaseController {
 
     private final KnowledgeCategoryApplicationService knowledgeCategoryApplicationService;
+    private final KnowledgePermissionHelper knowledgePermissionHelper;
 
     @Operation(summary = "分类列表")
     @PreAuthorize("@permission.has('knowledge:category:list')")
@@ -43,7 +45,7 @@ public class KnowledgeCategoryController extends BaseController {
     }
 
     @Operation(summary = "分类详情")
-    @PreAuthorize("@permission.has('knowledge:category:list')")
+    @PreAuthorize("@permission.has('knowledge:category:query')")
     @GetMapping("/{categoryId}")
     public ResponseDTO<KnowledgeCategoryDTO> detail(@PathVariable Long categoryId) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
@@ -89,9 +91,6 @@ public class KnowledgeCategoryController extends BaseController {
     }
 
     private void restrictToCurrentUserIfNeeded(KnowledgeCategoryQuery query) {
-        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
-        if (!loginUser.isAdmin()) {
-            query.setDeptId(loginUser.getDeptId());
-        }
+        knowledgePermissionHelper.applyCategoryQueryScope(query);
     }
 }

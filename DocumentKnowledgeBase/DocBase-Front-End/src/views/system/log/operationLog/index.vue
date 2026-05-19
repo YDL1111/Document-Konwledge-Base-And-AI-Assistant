@@ -34,6 +34,7 @@ const {
   resetForm,
   exportAllExcel,
   openDialog,
+  handleClean,
   handleDelete,
   handleBulkDelete,
   handleSelectionChange,
@@ -142,6 +143,12 @@ const timeRangeModel = computed({
           @click="handleBulkDelete(tableRef)"
         >
           批量删除
+        </el-button>
+        <el-button
+          type="warning"
+          @click="handleClean"
+        >
+          清空日志
         </el-button>
         <el-button
           type="primary"

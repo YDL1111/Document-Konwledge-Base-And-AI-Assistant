@@ -18,6 +18,7 @@ public class KnowledgeDocumentDTO {
     private Integer status;
     private String currentVersionNo;
     private String auditRemark;
+    private Long creatorId;
     private Date updateTime;
 
     public KnowledgeDocumentDTO(KnowledgeDocumentEntity entity) {
@@ -33,6 +34,7 @@ public class KnowledgeDocumentDTO {
             this.status = entity.getStatus();
             this.currentVersionNo = entity.getCurrentVersionNo();
             this.auditRemark = entity.getAuditRemark();
+            this.creatorId = entity.getCreatorId();
             this.updateTime = entity.getUpdateTime();
         }
     }

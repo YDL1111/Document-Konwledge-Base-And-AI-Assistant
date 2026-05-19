@@ -8,6 +8,7 @@ import { message } from "@/utils/message";
 import { useUserStoreHook } from "@/store/modules/user";
 import descriptionForm from "../description.vue";
 import {
+  cleanOperationLogApi,
   deleteOperationLogApi,
   exportOperationLogExcelApi,
   getOperationLogListApi,
@@ -216,6 +217,23 @@ export function useOperationLogHook() {
     });
   }
 
+  async function handleClean() {
+    try {
+      await ElMessageBox.confirm(
+        "确认清空全部操作日志吗？此操作不可恢复。",
+        "系统提示",
+        { confirmButtonText: "确认清空", cancelButtonText: "取消", type: "warning" }
+      );
+      await cleanOperationLogApi();
+      message("已清空全部操作日志", { type: "success" });
+      getOperationLogList();
+    } catch (e: any) {
+      if (e !== "cancel") {
+        message("清空失败", { type: "error" });
+      }
+    }
+  }
+
   onMounted(() => {
     getOperationLogList();
   });
@@ -235,6 +253,7 @@ export function useOperationLogHook() {
     openDialog,
     getOperationLogList,
     handleDelete,
+    handleClean,
     handleBulkDelete,
     handleSelectionChange,
     handlePageSizeChange,

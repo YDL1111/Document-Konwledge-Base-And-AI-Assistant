@@ -23,10 +23,6 @@ public class RouterDTO {
         if (entity != null) {
             this.name = entity.getRouterName();
             this.path = entity.getPath();
-            // 暂时不需要component
-//            this.component = entity.getComponent();
-//            this.rank = entity.getRank();
-//            this.redirect = entity.getRedirect();
             if (JacksonUtil.isJson(entity.getMetaInfo())) {
                 this.meta = JacksonUtil.from(entity.getMetaInfo(), MetaDTO.class);
             } else {
@@ -37,9 +33,7 @@ public class RouterDTO {
     }
 
     /**
-     * 路由名字  根据前端的要求   必须唯一
-     * 并按照前端项目的推荐  这个Name最好和组件的Name一样  使用菜单表中的router_name
-     * TODO 这里后端需要加校验
+     * 路由名字，必须唯一，对应前端组件的 name 和菜单表 router_name。
      */
     private String name;
 

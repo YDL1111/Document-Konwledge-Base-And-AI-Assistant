@@ -4,6 +4,9 @@ import com.docbase.domain.system.user.db.SysUserEntity;
 import com.docbase.domain.system.user.db.SysUserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -57,6 +60,30 @@ public class SysDeptServiceImpl extends ServiceImpl<SysDeptMapper, SysDeptEntity
         QueryWrapper<SysUserEntity> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("dept_id", deptId);
         return userMapper.exists(queryWrapper);
+    }
+
+    @Override
+    public List<Long> getDeptAndChildrenIds(Long deptId) {
+        List<SysDeptEntity> allDepts = this.list();
+        List<Long> result = new ArrayList<>();
+        result.add(deptId);
+        List<Long> childIds = allDepts.stream()
+            .filter(d -> {
+                String ancestors = d.getAncestors();
+                if (ancestors == null) {
+                    return false;
+                }
+                for (String part : ancestors.split(",")) {
+                    if (part.equals(String.valueOf(deptId))) {
+                        return true;
+                    }
+                }
+                return false;
+            })
+            .map(SysDeptEntity::getDeptId)
+            .collect(Collectors.toList());
+        result.addAll(childIds);
+        return result;
     }
 
 }

@@ -1,9 +1,11 @@
 package com.docbase.domain.knowledge.document.query;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.docbase.common.core.page.AbstractPageQuery;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentEntity;
+import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -19,6 +21,7 @@ public class KnowledgeDocumentQuery extends AbstractPageQuery<KnowledgeDocumentE
     private Long deptId;
     private Boolean onlyVisibleToCurrentUser;
     private Boolean includePublishedShared;
+    private List<Long> deptIdList;
 
     @Override
     public QueryWrapper<KnowledgeDocumentEntity> addQueryCondition() {
@@ -29,23 +32,29 @@ public class KnowledgeDocumentQuery extends AbstractPageQuery<KnowledgeDocumentE
             .eq(visibility != null, "visibility", visibility)
             .orderByDesc("update_time");
 
-        if (Boolean.TRUE.equals(onlyVisibleToCurrentUser) && creatorId != null) {
-            queryWrapper.and(wrapper -> wrapper
-                .eq("creator_id", creatorId)
-                .or(Boolean.TRUE.equals(includePublishedShared), shared -> {
-                    shared.eq("status", 3);
-                    if (deptId != null) {
-                        shared.and(visibilityWrapper -> visibilityWrapper
-                            .eq("visibility", 1)
-                            .or()
-                            .eq("visibility", 2)
-                            .eq("dept_id", deptId)
-                        );
-                    } else {
-                        shared.eq("visibility", 1);
+        if (Boolean.TRUE.equals(onlyVisibleToCurrentUser)) {
+            queryWrapper.and(wrapper -> {
+                if (creatorId != null) {
+                    wrapper.eq("creator_id", creatorId);
+                }
+                if (Boolean.TRUE.equals(includePublishedShared)) {
+                    if (creatorId != null) {
+                        wrapper.or();
                     }
-                })
-            );
+                    wrapper.eq("status", 3).and(visWrapper -> {
+                        visWrapper.eq("visibility", 1);
+                        if (CollUtil.isNotEmpty(deptIdList)) {
+                            visWrapper.or()
+                                .eq("visibility", 2)
+                                .in("dept_id", deptIdList);
+                        } else if (deptId != null) {
+                            visWrapper.or()
+                                .eq("visibility", 2)
+                                .eq("dept_id", deptId);
+                        }
+                    });
+                }
+            });
         } else if (creatorId != null) {
             queryWrapper.eq("creator_id", creatorId);
         }

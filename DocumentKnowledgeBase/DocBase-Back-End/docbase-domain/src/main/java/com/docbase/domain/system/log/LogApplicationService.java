@@ -24,7 +24,6 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class LogApplicationService {
 
-    // TODO 命名到时候统一改成叫LoginLog
     private final SysLoginInfoService loginInfoService;
 
     private final SysOperationLogService operationLogService;
@@ -49,6 +48,14 @@ public class LogApplicationService {
 
     public void deleteOperationLog(BulkOperationCommand<Long> deleteCommand) {
         operationLogService.removeBatchByIds(deleteCommand.getIds());
+    }
+
+    public void cleanLoginInfo() {
+        loginInfoService.remove(new QueryWrapper<>());
+    }
+
+    public void cleanOperationLog() {
+        operationLogService.remove(new QueryWrapper<>());
     }
 
 }

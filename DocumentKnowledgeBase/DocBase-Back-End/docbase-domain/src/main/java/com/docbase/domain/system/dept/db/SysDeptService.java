@@ -2,6 +2,8 @@ package com.docbase.domain.system.dept.db;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import java.util.List;
+
 /**
  * <p>
  * 部门表 服务类
@@ -46,5 +48,11 @@ public interface SysDeptService extends IService<SysDeptEntity> {
      */
     boolean isDeptAssignedToUsers(Long deptId);
 
+    /**
+     * 获取指定部门及其所有子孙部门的 ID 列表，用于 DEPT_TREE 数据范围过滤。
+     * @param deptId 部门ID
+     * @return 部门及子孙部门 ID 列表
+     */
+    List<Long> getDeptAndChildrenIds(Long deptId);
 
 }

@@ -39,6 +39,8 @@ public class OperationLogModel extends SysOperationLogEntity {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
         if (loginUser != null) {
             this.setUsername(loginUser.getUsername());
+            this.setUserId(loginUser.getUserId());
+            this.setDeptId(loginUser.getDeptId());
         }
 
         this.setOperationTime(DateUtil.date());

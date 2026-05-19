@@ -30,6 +30,7 @@ const {
   onSearch,
   resetForm,
   menuTree,
+  menuButtonList,
   getMenuTree,
   handleDelete,
   handleSelectionChange,
@@ -174,6 +175,7 @@ async function openDialog(type: "add" | "update", row?: RoleDTO) {
       :type="opType"
       :row="opRow"
       :menu-options="menuTree"
+      :button-options="menuButtonList"
     />
   </div>
 </template>

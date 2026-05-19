@@ -3,19 +3,13 @@ package com.docbase.admin.customize.service.permission.model.checker;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import com.docbase.admin.customize.service.permission.model.AbstractDataPermissionChecker;
 import com.docbase.admin.customize.service.permission.model.DataCondition;
-import com.docbase.domain.system.dept.db.SysDeptService;
-import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 数据权限测试接口
- * @author valarchie
+ * 默认拒绝数据权限：始终返回 false，作为未匹配角色的安全兜底。
  */
 @EqualsAndHashCode(callSuper = true)
-@Data
 public class DefaultDataPermissionChecker extends AbstractDataPermissionChecker {
-
-    private SysDeptService deptService;
 
     @Override
     public boolean check(SystemLoginUser loginUser, DataCondition condition) {

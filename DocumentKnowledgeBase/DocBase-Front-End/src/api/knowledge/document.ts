@@ -35,6 +35,7 @@ export interface KnowledgeDocumentDTO {
   status?: number;
   currentVersionNo?: string;
   auditRemark?: string;
+  creatorId?: number;
   updateTime?: string;
 }
 

@@ -12,8 +12,13 @@ import com.docbase.domain.knowledge.category.dto.KnowledgeCategoryDTO;
 import com.docbase.domain.knowledge.category.query.KnowledgeCategoryQuery;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentEntity;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentService;
+import com.docbase.domain.system.dept.db.SysDeptService;
+import com.docbase.infrastructure.user.AuthenticationUtils;
+import com.docbase.infrastructure.user.web.DataScopeEnum;
+import com.docbase.infrastructure.user.web.SystemLoginUser;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +29,7 @@ public class KnowledgeCategoryApplicationService {
 
     private final KnowledgeCategoryService knowledgeCategoryService;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final SysDeptService sysDeptService;
 
     public PageDTO<KnowledgeCategoryDTO> getCategoryList(KnowledgeCategoryQuery query) {
         Page<KnowledgeCategoryEntity> page =
@@ -100,12 +106,44 @@ public class KnowledgeCategoryApplicationService {
     }
 
     private Long resolveDeptId(Long commandDeptId, Long currentDeptId, boolean isAdmin) {
-        return isAdmin ? commandDeptId : currentDeptId;
+        if (isAdmin) {
+            return commandDeptId;
+        }
+        return currentDeptId;
     }
 
     private void ensureCategoryAccessible(KnowledgeCategoryEntity entity, Long currentDeptId, boolean isAdmin) {
-        if (!isAdmin && !Objects.equals(entity.getDeptId(), currentDeptId)) {
+        if (isAdmin) {
+            return;
+        }
+        if (!canAccessTargetDept(entity.getDeptId())) {
             throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
+        }
+    }
+
+    /**
+     * 基于当前用户的数据范围（DataScopeEnum）判断是否有权操作目标部门。
+     */
+    private boolean canAccessTargetDept(Long targetDeptId) {
+        if (targetDeptId == null) {
+            return false;
+        }
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        DataScopeEnum scope = loginUser.getRoleInfo().getDataScope();
+        switch (scope) {
+            case ALL:
+                return true;
+            case CUSTOM_DEFINE:
+                Set<Long> deptIdSet = loginUser.getRoleInfo().getDeptIdSet();
+                return deptIdSet != null && deptIdSet.contains(targetDeptId);
+            case SINGLE_DEPT:
+                return Objects.equals(targetDeptId, loginUser.getDeptId());
+            case DEPT_TREE:
+                return Objects.equals(targetDeptId, loginUser.getDeptId())
+                    || sysDeptService.isChildOfTheDept(loginUser.getDeptId(), targetDeptId);
+            case ONLY_SELF:
+            default:
+                return false;
         }
     }
 

@@ -1,9 +1,11 @@
 package com.docbase.domain.knowledge.ingest.query;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.docbase.common.core.page.AbstractPageQuery;
 import com.docbase.domain.knowledge.ingest.db.KnowledgeIngestTaskEntity;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -15,6 +17,7 @@ public class KnowledgeIngestTaskQuery extends AbstractPageQuery<KnowledgeIngestT
     private Integer status;
     private Long documentId;
     private Long creatorId;
+    private List<Long> deptIdList;
 
     @Override
     public QueryWrapper<KnowledgeIngestTaskEntity> addQueryCondition() {
@@ -23,6 +26,7 @@ public class KnowledgeIngestTaskQuery extends AbstractPageQuery<KnowledgeIngestT
             .eq(status != null, "status", status)
             .eq(documentId != null, "document_id", documentId)
             .eq(creatorId != null, "creator_id", creatorId)
+            .in(CollUtil.isNotEmpty(deptIdList), "dept_id", deptIdList)
             .orderByDesc("create_time");
     }
 }

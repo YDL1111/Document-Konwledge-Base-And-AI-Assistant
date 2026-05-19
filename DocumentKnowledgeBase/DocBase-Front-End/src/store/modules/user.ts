@@ -14,6 +14,15 @@ const dictionaryMapKey = "ag-dictionary-map";
 type DictionaryListMap = Map<string, Array<DictionaryData>>;
 type DictionaryRecordMap = Record<string, Record<string, DictionaryData>>;
 
+function normalizeDictionary(
+  dictionary: DictionaryListMap | Record<string, Array<DictionaryData>>
+): DictionaryListMap {
+  if (dictionary instanceof Map) {
+    return dictionary;
+  }
+  return new Map(Object.entries(dictionary || {}));
+}
+
 function getStoredToken() {
   return storageSession().getItem<TokenDTO>(sessionKey);
 }
@@ -41,10 +50,11 @@ export const useUserStore = defineStore({
     SET_CURRENT_USER_INFO(userInfo: CurrentUserInfoDTO) {
       this.currentUserInfo = userInfo;
     },
-    SET_DICTIONARY(dictionary: DictionaryListMap) {
+    SET_DICTIONARY(dictionary: DictionaryListMap | Record<string, Array<DictionaryData>>) {
+      const dictionaryMap = normalizeDictionary(dictionary);
       const dictionaryMapTmp: DictionaryRecordMap = {};
 
-      for (const [dictType, list] of dictionary.entries()) {
+      for (const [dictType, list] of dictionaryMap.entries()) {
         dictionaryMapTmp[dictType] = list.reduce<Record<string, DictionaryData>>(
           (map, dict) => {
             map[dict.value] = dict;
@@ -54,10 +64,10 @@ export const useUserStore = defineStore({
         );
       }
 
-      this.dictionaryList = dictionary;
+      this.dictionaryList = dictionaryMap;
       this.dictionaryMap = dictionaryMapTmp;
 
-      storageLocal().setItem<DictionaryListMap>(dictionaryListKey, dictionary);
+      storageLocal().setItem<DictionaryListMap>(dictionaryListKey, dictionaryMap);
       storageLocal().setItem<DictionaryRecordMap>(
         dictionaryMapKey,
         dictionaryMapTmp

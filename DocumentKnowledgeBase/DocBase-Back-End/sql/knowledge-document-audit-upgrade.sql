@@ -6,7 +6,7 @@ ALTER TABLE `knowledge_document`
 INSERT INTO `sys_menu`
 (`menu_id`, `menu_name`, `menu_type`, `router_name`, `parent_id`, `path`, `is_button`, `permission`, `meta_info`, `status`, `remark`, `creator_id`, `create_time`, `updater_id`, `update_time`, `deleted`)
 VALUES
-(138, '文档审核', 3, '', 103, '', 1, 'knowledge:document:audit', '{}', 1, '文档审核按钮', 1, NOW(), 1, NOW(), 0)
+(139, '文档审核', 3, '', 103, '', 1, 'knowledge:document:audit', '{}', 1, '文档审核按钮', 1, NOW(), 1, NOW(), 0)
 ON DUPLICATE KEY UPDATE
 `menu_name` = VALUES(`menu_name`),
 `menu_type` = VALUES(`menu_type`),
@@ -21,4 +21,4 @@ ON DUPLICATE KEY UPDATE
 `deleted` = VALUES(`deleted`);
 
 INSERT IGNORE INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
-(1, 138);
+(1, 139);

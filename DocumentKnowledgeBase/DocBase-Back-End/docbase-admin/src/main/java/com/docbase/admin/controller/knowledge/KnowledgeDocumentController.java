@@ -1,14 +1,15 @@
 package com.docbase.admin.controller.knowledge;
 
 import com.docbase.admin.customize.aop.accessLog.AccessLog;
+import com.docbase.admin.customize.service.permission.KnowledgePermissionHelper;
 import com.docbase.common.core.base.BaseController;
 import com.docbase.common.core.dto.ResponseDTO;
 import com.docbase.common.core.page.PageDTO;
 import com.docbase.common.enums.common.BusinessTypeEnum;
 import com.docbase.domain.knowledge.document.KnowledgeDocumentApplicationService;
 import com.docbase.domain.knowledge.document.command.KnowledgeDocumentAddCommand;
-import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDetailDTO;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDTO;
+import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDetailDTO;
 import com.docbase.domain.knowledge.document.query.KnowledgeDocumentQuery;
 import com.docbase.infrastructure.user.AuthenticationUtils;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
@@ -27,13 +28,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-@Tag(name = "知识库文档 API", description = "知识库文档相关接口")
+@Tag(name = "知识库文档 API", description = "知识库文档管理接口")
 @RestController
 @RequestMapping("/knowledge/documents")
 @RequiredArgsConstructor
 public class KnowledgeDocumentController extends BaseController {
 
     private final KnowledgeDocumentApplicationService knowledgeDocumentApplicationService;
+    private final KnowledgePermissionHelper knowledgePermissionHelper;
 
     @Operation(summary = "文档列表")
     @PreAuthorize("@permission.has('knowledge:document:list')")
@@ -59,7 +61,7 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     @Operation(summary = "文档预览地址")
-    @PreAuthorize("@permission.has('knowledge:document:list')")
+    @PreAuthorize("@permission.has('knowledge:document:preview')")
     @GetMapping("/{documentId}/preview")
     public ResponseDTO<String> preview(@PathVariable Long documentId) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
@@ -74,7 +76,7 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     @Operation(summary = "下载当前文档")
-    @PreAuthorize("@permission.has('knowledge:document:list')")
+    @PreAuthorize("@permission.has('knowledge:document:download')")
     @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.EXPORT)
     @GetMapping("/{documentId}/download")
     public ResponseEntity<byte[]> download(@PathVariable Long documentId) {
@@ -88,7 +90,8 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     @Operation(summary = "新增文档")
-    @PreAuthorize("@permission.has('knowledge:document:add')")
+    @PreAuthorize("@permission.has('knowledge:document:upload')")
+    @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.ADD)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseDTO<Void> add(@Valid KnowledgeDocumentAddCommand addCommand,
                                  @RequestParam("file") MultipartFile file) {
@@ -97,12 +100,6 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     private void restrictToCurrentUserIfNeeded(KnowledgeDocumentQuery query) {
-        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
-        if (!loginUser.isAdmin()) {
-            query.setCreatorId(loginUser.getUserId());
-            query.setDeptId(loginUser.getDeptId());
-            query.setOnlyVisibleToCurrentUser(Boolean.TRUE);
-            query.setIncludePublishedShared(Boolean.TRUE);
-        }
+        knowledgePermissionHelper.applyDocumentQueryScope(query);
     }
 }

@@ -97,7 +97,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/login", "/register", "/getConfig", "/captchaImage", "/api/**").anonymous()
                 .requestMatchers(HttpMethod.GET, "/", "/*.html", "/**/*.html", "/**/*.css", "/**/*.js",
-                    "/profile/avatar/**").permitAll()
+                    "/profile/avatar/**", "/profile/document/**").permitAll()
                 .requestMatchers(
                     "/swagger-ui.html",
                     "/swagger-ui/**",

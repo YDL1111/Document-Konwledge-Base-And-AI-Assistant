@@ -1,13 +1,13 @@
 package com.docbase.admin.controller.knowledge;
 
+import com.docbase.admin.customize.service.permission.KnowledgePermissionHelper;
 import com.docbase.common.core.base.BaseController;
 import com.docbase.common.core.dto.ResponseDTO;
 import com.docbase.common.core.page.PageDTO;
 import com.docbase.domain.knowledge.ingest.KnowledgeIngestTaskApplicationService;
 import com.docbase.domain.knowledge.ingest.dto.KnowledgeIngestTaskDTO;
 import com.docbase.domain.knowledge.ingest.query.KnowledgeIngestTaskQuery;
-import com.docbase.infrastructure.user.AuthenticationUtils;
-import com.docbase.infrastructure.user.web.SystemLoginUser;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KnowledgeIngestTaskController extends BaseController {
 
     private final KnowledgeIngestTaskApplicationService knowledgeIngestTaskApplicationService;
+    private final KnowledgePermissionHelper knowledgePermissionHelper;
 
     @Operation(summary = "入库任务列表")
     @PreAuthorize("@permission.has('knowledge:ingest:list')")
@@ -33,9 +34,6 @@ public class KnowledgeIngestTaskController extends BaseController {
     }
 
     private void restrictToCurrentUserIfNeeded(KnowledgeIngestTaskQuery query) {
-        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
-        if (!loginUser.isAdmin()) {
-            query.setCreatorId(loginUser.getUserId());
-        }
+        knowledgePermissionHelper.applyIngestTaskQueryScope(query);
     }
 }

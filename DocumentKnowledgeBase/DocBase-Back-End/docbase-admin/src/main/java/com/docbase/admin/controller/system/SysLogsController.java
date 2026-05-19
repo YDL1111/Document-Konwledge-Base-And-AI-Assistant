@@ -76,28 +76,6 @@ public class SysLogsController extends BaseController {
         return ResponseDTO.ok(pageDTO);
     }
 
-//    @GetMapping("/download")
-//    public ResponseEntity<InputStreamResource> downloadFile() throws IOException {
-//        // 从文件系统或其他位置获取文件输入流
-//        File file = new File("path/to/file");
-//        InputStream inputStream = new FileInputStream(file);
-//        CustomExcelUtil.wri
-//
-//        // 创建一个 InputStreamResource 对象，将文件输入流包装在其中
-//        InputStreamResource resource = new InputStreamResource(inputStream);
-//
-//        // 返回 ResponseEntity 对象，其中包含 InputStreamResource 对象和文件名
-//        return ResponseEntity.ok()
-//                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment;filename=" + file.getName())
-//                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-//                .contentLength(file.length())
-//                .body(resource);
-//    }
-    /**
-     * 可否改成以上的形式 TODO
-     * @param response
-     * @param query
-     */
     @Operation(summary = "操作日志导出")
     @AccessLog(title = "操作日志", businessType = BusinessTypeEnum.EXPORT)
     @PreAuthorize("@permission.has('monitor:operlog:export')")
@@ -116,5 +94,22 @@ public class SysLogsController extends BaseController {
         return ResponseDTO.ok();
     }
 
+    @Operation(summary = "清空登录日志")
+    @AccessLog(title = "登录日志", businessType = BusinessTypeEnum.CLEAN)
+    @PreAuthorize("@permission.has('monitor:logininfor:remove')")
+    @DeleteMapping("/loginLogs/clean")
+    public ResponseDTO<Void> cleanLoginInfos() {
+        logApplicationService.cleanLoginInfo();
+        return ResponseDTO.ok();
+    }
+
+    @Operation(summary = "清空操作日志")
+    @AccessLog(title = "操作日志", businessType = BusinessTypeEnum.CLEAN)
+    @PreAuthorize("@permission.has('monitor:operlog:remove')")
+    @DeleteMapping("/operationLogs/clean")
+    public ResponseDTO<Void> cleanOperationLogs() {
+        logApplicationService.cleanOperationLog();
+        return ResponseDTO.ok();
+    }
 
 }

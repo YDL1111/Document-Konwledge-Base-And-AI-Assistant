@@ -42,7 +42,7 @@ const searchForm = reactive<KnowledgeCategoryQuery>({
 const formModel = reactive<KnowledgeCategoryRequest>({
   parentId: 0,
   categoryName: "",
-  sortNum: 10,
+  sortNum: 1,
   status: 1,
   remark: ""
 });
@@ -159,10 +159,18 @@ function resetForm() {
   editingId.value = undefined;
   formModel.parentId = 0;
   formModel.categoryName = "";
-  formModel.sortNum = 10;
+  formModel.sortNum = 1;
   formModel.status = 1;
   formModel.remark = "";
   formRef.value?.clearValidate();
+}
+
+function getNextSortNum(parentId = 0) {
+  const siblingSortNums = categoryList.value
+    .filter(item => (item.parentId ?? 0) === parentId)
+    .map(item => item.sortNum ?? 0);
+  const maxSortNum = siblingSortNums.length ? Math.max(...siblingSortNums) : 0;
+  return maxSortNum + 1;
 }
 
 function getParentCategoryName(parentId?: number) {
@@ -176,6 +184,7 @@ function openAddDialog(row?: KnowledgeCategoryDTO) {
   if (row?.categoryId) {
     formModel.parentId = row.categoryId;
   }
+  formModel.sortNum = getNextSortNum(formModel.parentId ?? 0);
   dialogVisible.value = true;
 }
 
@@ -187,7 +196,7 @@ async function openEditDialog(row: KnowledgeCategoryDTO) {
     editingId.value = data.categoryId;
     formModel.parentId = data.parentId ?? 0;
     formModel.categoryName = data.categoryName;
-    formModel.sortNum = data.sortNum ?? 10;
+    formModel.sortNum = data.sortNum ?? 1;
     formModel.status = data.status ?? 1;
     formModel.remark = data.remark ?? "";
     dialogVisible.value = true;

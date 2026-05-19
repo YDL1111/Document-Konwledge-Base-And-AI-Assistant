@@ -8,8 +8,8 @@ import { useUserStoreHook } from "@/store/modules/user";
 const props = withDefaults(defineProps<FormProps>(), {
   formInline: () => ({
     noticeTitle: "",
-    noticeType: "",
-    status: "",
+    noticeType: undefined as unknown as number,
+    status: undefined as unknown as number,
     noticeContent: ""
   })
 });
@@ -57,7 +57,7 @@ defineExpose({ getFormRuleRef });
         />
       </el-select>
     </el-form-item>
-    <el-form-item label="公告类型" prop="status">
+    <el-form-item label="状态" prop="status">
       <el-select
         v-model="noticeData.status"
         placeholder="请选择状态"

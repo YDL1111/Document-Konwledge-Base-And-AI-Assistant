@@ -3,7 +3,7 @@ USE `docbase_knowledge`;
 CREATE TABLE IF NOT EXISTS `knowledge_document_audit_log` (
     `audit_log_id` bigint NOT NULL AUTO_INCREMENT COMMENT '审核记录ID',
     `document_id` bigint NOT NULL COMMENT '文档ID',
-    `audit_result` tinyint NOT NULL COMMENT '审核结果：1通过 0驳回',
+    `audit_result` tinyint NOT NULL COMMENT '审核结果，1通过 0驳回',
     `audit_remark` varchar(500) DEFAULT NULL COMMENT '审核备注',
     `auditor_id` bigint DEFAULT NULL COMMENT '审核人ID',
     `auditor_name` varchar(64) DEFAULT NULL COMMENT '审核人名称',
@@ -17,4 +17,4 @@ CREATE TABLE IF NOT EXISTS `knowledge_document_audit_log` (
     PRIMARY KEY (`audit_log_id`),
     KEY `idx_kd_audit_document_id` (`document_id`),
     KEY `idx_kd_audit_create_time` (`create_time`)
-) COMMENT='知识库文档审核记录表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='知识库文档审核记录表';

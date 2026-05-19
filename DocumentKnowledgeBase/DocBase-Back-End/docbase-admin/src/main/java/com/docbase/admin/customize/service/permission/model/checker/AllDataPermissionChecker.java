@@ -3,20 +3,13 @@ package com.docbase.admin.customize.service.permission.model.checker;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import com.docbase.admin.customize.service.permission.model.AbstractDataPermissionChecker;
 import com.docbase.admin.customize.service.permission.model.DataCondition;
-import com.docbase.domain.system.dept.db.SysDeptService;
-import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 数据权限测试接口
- * @author valarchie
+ * 全部数据权限：始终返回 true，供管理员角色使用。
  */
 @EqualsAndHashCode(callSuper = true)
-@Data
 public class AllDataPermissionChecker extends AbstractDataPermissionChecker {
-
-    private SysDeptService deptService;
-
 
     @Override
     public boolean check(SystemLoginUser loginUser, DataCondition condition) {

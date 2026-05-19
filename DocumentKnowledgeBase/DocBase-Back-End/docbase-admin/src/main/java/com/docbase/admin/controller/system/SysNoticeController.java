@@ -13,7 +13,7 @@ import com.docbase.admin.customize.aop.accessLog.AccessLog;
 import com.docbase.infrastructure.annotations.unrepeatable.Unrepeatable;
 import com.docbase.infrastructure.annotations.unrepeatable.Unrepeatable.CheckType;
 import com.docbase.common.enums.common.BusinessTypeEnum;
-import com.baomidou.dynamic.datasource.annotation.DS;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
@@ -53,19 +53,6 @@ public class SysNoticeController extends BaseController {
     @PreAuthorize("@permission.has('system:notice:list')")
     @GetMapping
     public ResponseDTO<PageDTO<NoticeDTO>> list(NoticeQuery query) {
-        PageDTO<NoticeDTO> pageDTO = noticeApplicationService.getNoticeList(query);
-        return ResponseDTO.ok(pageDTO);
-    }
-
-    /**
-     * 获取通知公告列表
-     * 从从库获取数据 例子 仅供参考
-     */
-    @Operation(summary = "公告列表（从数据库从库获取）", description = "演示主从库的例子")
-    @DS("slave")
-    @PreAuthorize("@permission.has('system:notice:list')")
-    @GetMapping("/database/slave")
-    public ResponseDTO<PageDTO<NoticeDTO>> listFromSlave(NoticeQuery query) {
         PageDTO<NoticeDTO> pageDTO = noticeApplicationService.getNoticeList(query);
         return ResponseDTO.ok(pageDTO);
     }

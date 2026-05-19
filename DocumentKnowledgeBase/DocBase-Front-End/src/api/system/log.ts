@@ -60,6 +60,11 @@ export const deleteOperationLogApi = (data: Array<number>) => {
   });
 };
 
+/** 清空操作日志 */
+export const cleanOperationLogApi = () => {
+  return http.request<ResponseData<void>>("delete", "/logs/operationLogs/clean");
+};
+
 /** 登录日志查询类 */
 export interface LoginLogQuery extends BasePageQuery {
   beginTime?: string;
@@ -74,14 +79,12 @@ export interface LoginLogQuery extends BasePageQuery {
  */
 export interface LoginLogsDTO {
   browser?: string;
-  infoId?: string;
   logId?: number;
   ipAddress?: string;
   loginLocation?: string;
   loginTime?: Date;
   msg?: string;
   operationSystem?: string;
-  /** TODO 这个登录状态的设计很奇怪  需要重构掉 */
   status?: number;
   statusStr?: string;
   username?: string;
@@ -114,4 +117,9 @@ export const deleteLoginLogApi = (data: Array<number>) => {
       ids: data.toString()
     }
   });
+};
+
+/** 清空登录日志 */
+export const cleanLoginLogApi = () => {
+  return http.request<ResponseData<void>>("delete", "/logs/loginLogs/clean");
 };
