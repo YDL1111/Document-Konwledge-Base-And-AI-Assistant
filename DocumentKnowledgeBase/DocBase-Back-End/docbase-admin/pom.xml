@@ -24,6 +24,12 @@
             <artifactId>docbase-domain</artifactId>
         </dependency>
 
+        <!-- 通用工具模块 -->
+        <dependency>
+            <groupId>com.docbase</groupId>
+            <artifactId>docbase-common</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

@@ -14,6 +14,7 @@ public class KnowledgeCategoryQuery extends AbstractPageQuery<KnowledgeCategoryE
     private String categoryName;
     private Integer status;
     private Long parentId;
+    private Long deptId;
 
     @Override
     public QueryWrapper<KnowledgeCategoryEntity> addQueryCondition() {
@@ -21,6 +22,7 @@ public class KnowledgeCategoryQuery extends AbstractPageQuery<KnowledgeCategoryE
             .like(StrUtil.isNotBlank(categoryName), "category_name", categoryName)
             .eq(status != null, "status", status)
             .eq(parentId != null, "parent_id", parentId)
+            .eq(deptId != null, "dept_id", deptId)
             .orderByAsc("sort_num")
             .orderByDesc("create_time");
     }

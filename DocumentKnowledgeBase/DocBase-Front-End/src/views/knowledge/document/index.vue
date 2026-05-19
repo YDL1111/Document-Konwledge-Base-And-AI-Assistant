@@ -10,14 +10,14 @@ import type {
   UploadUserFile
 } from "element-plus";
 import { hasAuth } from "@/router/utils";
-import { getToken } from "@/utils/auth";
-import { formatToken } from "@/utils/auth";
 import { handleTree } from "@/utils/tree";
 import { message } from "@/utils/message";
+import { http } from "@/utils/http";
 import {
   addKnowledgeDocumentApi,
   auditKnowledgeDocumentApi,
   getKnowledgeDocumentDetailApi,
+  getKnowledgeDocumentDownloadUrl,
   getKnowledgeDocumentListApi,
   getKnowledgeDocumentPreviewApi,
   type KnowledgeDocumentAddRequest,
@@ -330,47 +330,17 @@ async function previewCurrentDocument() {
   }
 }
 
-async function downloadCurrentDocument() {
+function downloadCurrentDocument() {
   if (!detailData.value?.documentId) {
     message("当前文档信息不完整", { type: "warning" });
     return;
   }
-  const downloadUrl =
-    detailData.value.currentVersionStorageUrl ||
-    detailData.value.currentVersion?.storageUrl;
-  if (!downloadUrl) {
-    message("当前文档暂无可下载地址", { type: "warning" });
-    return;
-  }
-  try {
-    const tokenInfo = getToken();
-    const response = await fetch(downloadUrl, {
-      method: "GET",
-      headers: tokenInfo?.token
-        ? {
-            Authorization: formatToken(tokenInfo.token)
-          }
-        : undefined
-    });
-    if (!response.ok) {
-      throw new Error(`download failed: ${response.status}`);
-    }
-    const blob = await response.blob();
-    const objectUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download =
-      detailData.value.currentVersion?.fileName || `${detailData.value.title}.bin`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(objectUrl);
-  } catch (error) {
-    console.error(error);
-    message("文档下载失败，请检查文件地址或后端静态资源配置", {
-      type: "error"
-    });
-  }
+  const fileName =
+    detailData.value.currentVersion?.fileName || `${detailData.value.title}.bin`;
+  http.download(
+    getKnowledgeDocumentDownloadUrl(detailData.value.documentId),
+    fileName
+  );
 }
 
 function formatTime(value?: string) {
@@ -413,7 +383,7 @@ onMounted(() => {
           <div>
             <span>文档管理</span>
             <p class="subtext">
-              支持企业文档上传、查看详情、版本跟踪、审核流转，以及按可见范围控制普通用户访问。
+              支持企业文档上传、审批、详情查看、版本记录、预览下载与可见范围控制。
             </p>
           </div>
           <div class="header-actions">
@@ -467,7 +437,7 @@ onMounted(() => {
       </el-form>
 
       <el-alert
-        title="管理员可在这里审批待审核文档；普通用户可查看自己提交的文档，以及符合权限范围且已发布的共享文档。"
+        title="管理员可审批待审核文档；普通用户可查看自己提交的文档，以及符合权限范围且已发布的共享文档。"
         type="info"
         :closable="false"
         class="tips"
@@ -481,12 +451,7 @@ onMounted(() => {
 
       <el-table :data="dataList" v-loading="loading" border>
         <el-table-column prop="documentId" label="文档ID" width="96" />
-        <el-table-column
-          prop="title"
-          label="文档标题"
-          min-width="220"
-          show-overflow-tooltip
-        />
+        <el-table-column prop="title" label="文档标题" min-width="220" show-overflow-tooltip />
         <el-table-column label="分类" min-width="160">
           <template #default="{ row }">
             {{ getCategoryName(row.categoryId) }}
@@ -496,7 +461,7 @@ onMounted(() => {
         <el-table-column prop="currentVersionNo" label="当前版本" width="110" />
         <el-table-column prop="visibility" label="可见范围" width="120">
           <template #default="{ row }">
-            {{ visibilityMap[row.visibility] || "-" }}
+            {{ visibilityMap[row.visibility || 0] || "-" }}
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -513,12 +478,9 @@ onMounted(() => {
             {{ formatTime(row.updateTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="260">
+        <el-table-column label="操作" fixed="right" width="220">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-            <el-button link type="primary" @click="openDetail(row)">
-              预览/下载
-            </el-button>
             <el-button
               v-if="canAudit && row.status === 2"
               link
@@ -529,7 +491,6 @@ onMounted(() => {
             </el-button>
           </template>
         </el-table-column>
-
         <template #empty>
           <el-empty description="暂无文档数据" />
         </template>
@@ -549,12 +510,7 @@ onMounted(() => {
       </div>
     </el-card>
 
-    <el-dialog
-      v-model="dialogVisible"
-      title="新增文档"
-      width="680px"
-      @closed="handleDialogClosed"
-    >
+    <el-dialog v-model="dialogVisible" title="新增文档" width="680px" @closed="handleDialogClosed">
       <el-form ref="formRef" :model="formModel" :rules="rules" label-width="90px">
         <el-form-item label="所属分类" prop="categoryId">
           <el-tree-select
@@ -580,11 +536,7 @@ onMounted(() => {
           <el-input v-model="formModel.title" maxlength="256" placeholder="请输入文档标题" />
         </el-form-item>
         <el-form-item label="文档编号" prop="docCode">
-          <el-input
-            v-model="formModel.docCode"
-            maxlength="64"
-            placeholder="可选，便于企业内部检索"
-          />
+          <el-input v-model="formModel.docCode" maxlength="64" placeholder="可选，便于内部检索" />
         </el-form-item>
         <el-form-item label="上传文件" required>
           <el-upload
@@ -598,8 +550,7 @@ onMounted(() => {
             <el-button type="primary" plain>选择本地文件</el-button>
             <template #tip>
               <div class="upload-tip">
-                支持 PDF、Office、TXT、ZIP、RAR 等格式，首次上传后会自动生成版本号
-                `v1.0.0`。
+                支持 PDF、Office、TXT、ZIP、RAR 等格式，首次上传后会自动生成版本号 `v1.0.0`。
               </div>
             </template>
           </el-upload>
@@ -615,11 +566,7 @@ onMounted(() => {
           />
         </el-form-item>
         <el-form-item label="标签" prop="tags">
-          <el-input
-            v-model="formModel.tags"
-            maxlength="1000"
-            placeholder="多个标签可用逗号分隔"
-          />
+          <el-input v-model="formModel.tags" maxlength="1000" placeholder="多个标签可用逗号分隔" />
         </el-form-item>
         <el-form-item label="可见范围" prop="visibility">
           <el-select v-model="formModel.visibility" style="width: 100%">
@@ -637,9 +584,7 @@ onMounted(() => {
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">
-          提交
-        </el-button>
+        <el-button type="primary" :loading="submitting" @click="submitForm">提交</el-button>
       </template>
     </el-dialog>
 
@@ -767,12 +712,7 @@ onMounted(() => {
       </div>
     </el-drawer>
 
-    <el-dialog
-      v-model="auditVisible"
-      title="文档审核"
-      width="520px"
-      @closed="handleAuditClosed"
-    >
+    <el-dialog v-model="auditVisible" title="文档审核" width="520px" @closed="handleAuditClosed">
       <el-form ref="auditFormRef" :model="auditForm" :rules="auditRules" label-width="90px">
         <el-form-item label="文档标题">
           <span>{{ auditTarget?.title || "-" }}</span>

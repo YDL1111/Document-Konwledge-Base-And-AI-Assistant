@@ -32,21 +32,19 @@ import com.docbase.domain.system.user.db.SysUserService;
 import com.docbase.infrastructure.user.AuthenticationUtils;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import java.io.File;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class KnowledgeDocumentApplicationService {
 
@@ -120,19 +118,13 @@ public class KnowledgeDocumentApplicationService {
             detailDTO.setCurrentVersionStoragePath(currentVersion.getStoragePath());
         }
 
-        List<KnowledgeDocumentAuditLogDTO> auditHistoryList;
-        try {
-            auditHistoryList = knowledgeDocumentAuditLogService.list(
-                    new LambdaQueryWrapper<KnowledgeDocumentAuditLogEntity>()
-                        .eq(KnowledgeDocumentAuditLogEntity::getDocumentId, documentId)
-                        .orderByDesc(KnowledgeDocumentAuditLogEntity::getCreateTime)
-                ).stream()
-                .map(KnowledgeDocumentAuditLogDTO::new)
-                .collect(Collectors.toList());
-        } catch (Exception exception) {
-            log.warn("加载文档审核历史失败，已自动降级为空列表，documentId={}", documentId, exception);
-            auditHistoryList = Collections.emptyList();
-        }
+        List<KnowledgeDocumentAuditLogDTO> auditHistoryList = knowledgeDocumentAuditLogService.list(
+                new LambdaQueryWrapper<KnowledgeDocumentAuditLogEntity>()
+                    .eq(KnowledgeDocumentAuditLogEntity::getDocumentId, documentId)
+                    .orderByDesc(KnowledgeDocumentAuditLogEntity::getCreateTime)
+            ).stream()
+            .map(KnowledgeDocumentAuditLogDTO::new)
+            .collect(Collectors.toList());
         detailDTO.setAuditHistoryList(auditHistoryList);
 
         return detailDTO;
@@ -164,6 +156,7 @@ public class KnowledgeDocumentApplicationService {
         HttpHeaders headers = FileUploadUtils.getDownloadHeader(
             Objects.requireNonNullElse(currentVersion.getFileName(), storedFileName)
         );
+        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
         return new ResponseEntity<>(FileUtil.readBytes(new File(filePath)), headers, HttpStatus.OK);
     }
 
@@ -193,7 +186,7 @@ public class KnowledgeDocumentApplicationService {
                 .last("limit 1")
         );
         if (currentVersion == null) {
-            throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, documentId, "文档版本");
+            throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, documentId, "文档当前版本");
         }
         return currentVersion;
     }
@@ -202,29 +195,37 @@ public class KnowledgeDocumentApplicationService {
         if (Objects.equals(entity.getCreatorId(), currentUserId)) {
             return true;
         }
-        if (!Objects.equals(entity.getStatus(), 3)) {
+        if (!Objects.equals(entity.getStatus(), KnowledgeDocumentConstant.Status.PUBLISHED)) {
             return false;
         }
-        if (Objects.equals(entity.getVisibility(), 1)) {
+        if (Objects.equals(entity.getVisibility(), KnowledgeDocumentConstant.Visibility.PUBLIC)) {
             return true;
         }
-        return Objects.equals(entity.getVisibility(), 2) && Objects.equals(entity.getDeptId(), currentDeptId);
+        return Objects.equals(entity.getVisibility(), KnowledgeDocumentConstant.Visibility.DEPT)
+            && Objects.equals(entity.getDeptId(), currentDeptId);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void auditDocument(Long documentId, KnowledgeDocumentAuditCommand command) {
-        KnowledgeDocumentEntity entity = knowledgeDocumentService.getById(documentId);
-        if (entity == null) {
-            throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, documentId, "文档");
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        KnowledgeDocumentEntity entity = getAccessibleDocument(
+            documentId,
+            loginUser.getUserId(),
+            loginUser.getDeptId(),
+            loginUser.isAdmin()
+        );
+        if (!loginUser.isAdmin() && !Objects.equals(entity.getDeptId(), loginUser.getDeptId())) {
+            throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
         }
-        if (!Objects.equals(entity.getStatus(), 2)) {
-            throw new ApiException(ErrorCode.Internal.INVALID_PARAMETER, "只有审核中的文档才允许审批");
+        if (!Objects.equals(entity.getStatus(), KnowledgeDocumentConstant.Status.PENDING_AUDIT)) {
+            throw new ApiException(ErrorCode.Internal.INVALID_PARAMETER, "当前文档状态不允许审核");
         }
 
-        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
         int beforeStatus = entity.getStatus();
         boolean approved = Objects.equals(command.getApproved(), 1);
-        entity.setStatus(approved ? 3 : 1);
+        entity.setStatus(approved
+            ? KnowledgeDocumentConstant.Status.PUBLISHED
+            : KnowledgeDocumentConstant.Status.REJECTED);
         entity.setAuditRemark(command.getAuditRemark());
         knowledgeDocumentService.updateById(entity);
 
@@ -253,9 +254,8 @@ public class KnowledgeDocumentApplicationService {
         entity.setSummary(command.getSummary());
         entity.setTags(command.getTags());
         entity.setVisibility(command.getVisibility());
-        entity.setStatus(2);
+        entity.setStatus(KnowledgeDocumentConstant.Status.PENDING_AUDIT);
         entity.setCurrentVersionNo(versionNo);
-
         knowledgeDocumentService.save(entity);
 
         KnowledgeDocumentVersionEntity versionEntity = new KnowledgeDocumentVersionEntity();
@@ -267,7 +267,7 @@ public class KnowledgeDocumentApplicationService {
         versionEntity.setStorageType("local");
         versionEntity.setStoragePath(storedPath);
         versionEntity.setStorageUrl(ServletHolderUtil.getContextUrl() + storedPath);
-        versionEntity.setVersionRemark("初始上传");
+        versionEntity.setVersionRemark("首次上传");
         versionEntity.setParseStatus(1);
         versionEntity.setIsCurrent(Boolean.TRUE);
         knowledgeDocumentVersionService.save(versionEntity);

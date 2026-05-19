@@ -10,6 +10,8 @@ import com.docbase.domain.knowledge.category.command.KnowledgeCategoryAddCommand
 import com.docbase.domain.knowledge.category.command.KnowledgeCategoryUpdateCommand;
 import com.docbase.domain.knowledge.category.dto.KnowledgeCategoryDTO;
 import com.docbase.domain.knowledge.category.query.KnowledgeCategoryQuery;
+import com.docbase.infrastructure.user.AuthenticationUtils;
+import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -36,6 +38,7 @@ public class KnowledgeCategoryController extends BaseController {
     @PreAuthorize("@permission.has('knowledge:category:list')")
     @GetMapping
     public ResponseDTO<PageDTO<KnowledgeCategoryDTO>> list(KnowledgeCategoryQuery query) {
+        restrictToCurrentUserIfNeeded(query);
         return ResponseDTO.ok(knowledgeCategoryApplicationService.getCategoryList(query));
     }
 
@@ -43,7 +46,14 @@ public class KnowledgeCategoryController extends BaseController {
     @PreAuthorize("@permission.has('knowledge:category:list')")
     @GetMapping("/{categoryId}")
     public ResponseDTO<KnowledgeCategoryDTO> detail(@PathVariable Long categoryId) {
-        return ResponseDTO.ok(knowledgeCategoryApplicationService.getCategoryInfo(categoryId));
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        return ResponseDTO.ok(
+            knowledgeCategoryApplicationService.getCategoryInfo(
+                categoryId,
+                loginUser.getDeptId(),
+                loginUser.isAdmin()
+            )
+        );
     }
 
     @Operation(summary = "新增分类")
@@ -51,7 +61,8 @@ public class KnowledgeCategoryController extends BaseController {
     @AccessLog(title = "知识库分类", businessType = BusinessTypeEnum.ADD)
     @PostMapping
     public ResponseDTO<Void> add(@Valid @RequestBody KnowledgeCategoryAddCommand command) {
-        knowledgeCategoryApplicationService.addCategory(command);
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        knowledgeCategoryApplicationService.addCategory(command, loginUser.getDeptId(), loginUser.isAdmin());
         return ResponseDTO.ok();
     }
 
@@ -61,8 +72,9 @@ public class KnowledgeCategoryController extends BaseController {
     @PutMapping("/{categoryId}")
     public ResponseDTO<Void> edit(@PathVariable Long categoryId,
                                   @Valid @RequestBody KnowledgeCategoryUpdateCommand command) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
         command.setCategoryId(categoryId);
-        knowledgeCategoryApplicationService.updateCategory(command);
+        knowledgeCategoryApplicationService.updateCategory(command, loginUser.getDeptId(), loginUser.isAdmin());
         return ResponseDTO.ok();
     }
 
@@ -71,7 +83,15 @@ public class KnowledgeCategoryController extends BaseController {
     @AccessLog(title = "知识库分类", businessType = BusinessTypeEnum.DELETE)
     @DeleteMapping("/{categoryId}")
     public ResponseDTO<Void> remove(@PathVariable Long categoryId) {
-        knowledgeCategoryApplicationService.deleteCategory(categoryId);
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        knowledgeCategoryApplicationService.deleteCategory(categoryId, loginUser.getDeptId(), loginUser.isAdmin());
         return ResponseDTO.ok();
+    }
+
+    private void restrictToCurrentUserIfNeeded(KnowledgeCategoryQuery query) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        if (!loginUser.isAdmin()) {
+            query.setDeptId(loginUser.getDeptId());
+        }
     }
 }

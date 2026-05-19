@@ -1,6 +1,7 @@
 package com.docbase.domain.knowledge.document.db;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
@@ -57,7 +58,7 @@ public class KnowledgeDocumentVersionEntity extends Model<KnowledgeDocumentVersi
     @TableField("is_current")
     private Boolean isCurrent;
 
-    @TableField("creator_id")
+    @TableField(value = "creator_id", fill = FieldFill.INSERT)
     private Long creatorId;
 
     @TableField("create_time")
