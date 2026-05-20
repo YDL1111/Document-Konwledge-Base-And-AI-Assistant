@@ -15,13 +15,20 @@ router = APIRouter(prefix="/api/system", tags=["系统"])
 
 @router.get("/health")
 async def health_check():
-    ollama_ok = rag_service.test_connection()
+    llm_ok = rag_service.test_connection()
+    embedding_model = (
+        settings.HF_EMBEDDING_MODEL
+        if settings.EMBEDDING_PROVIDER.lower() == "huggingface"
+        else settings.OLLAMA_EMBEDDING_MODEL
+    )
     return {
-        "status":          "healthy",
-        "ollama":          ollama_ok,
-        "llm_model":       settings.OLLAMA_LLM_MODEL,
-        "embedding_model": settings.OLLAMA_EMBEDDING_MODEL,
-        "version":         settings.APP_VERSION,
+        "status": "healthy",
+        "llm_provider": settings.LLM_PROVIDER,
+        "llm_available": llm_ok,
+        "llm_model": settings.DEEPSEEK_MODEL,
+        "embedding_provider": settings.EMBEDDING_PROVIDER,
+        "embedding_model": embedding_model,
+        "version": settings.APP_VERSION,
     }
 
 
@@ -47,11 +54,23 @@ async def clear_cache(kb_id: int = None):
 
 @router.get("/models")
 async def list_models():
+    if settings.LLM_PROVIDER.lower() == "deepseek":
+        return {
+            "llm_provider": settings.LLM_PROVIDER,
+            "llm_model": settings.DEEPSEEK_MODEL,
+            "embedding_provider": settings.EMBEDDING_PROVIDER,
+            "embedding_model": (
+                settings.HF_EMBEDDING_MODEL
+                if settings.EMBEDDING_PROVIDER.lower() == "huggingface"
+                else settings.OLLAMA_EMBEDDING_MODEL
+            ),
+        }
+
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(
+            response = await client.get(
                 f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=5
             )
-            return {"models": [m["name"] for m in r.json().get("models", [])]}
+            return {"models": [m["name"] for m in response.json().get("models", [])]}
     except Exception as e:
         return {"models": [], "error": str(e)}

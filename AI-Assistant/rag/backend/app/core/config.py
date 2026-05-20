@@ -20,14 +20,27 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Database
-    DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/rag_db"
+    DATABASE_URL: str = "mysql+pymysql://root:123456@localhost:3306/docbase_knowledge"
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
 
-    # Ollama
+    # LLM Provider
+    LLM_PROVIDER: str = "deepseek"
+    DEEPSEEK_API_KEY: str = "your_deepseek_api_key"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
+
+    # Embedding Provider
+    EMBEDDING_PROVIDER: str = "huggingface"
+
+    # Ollama Embedding
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_LLM_MODEL: str = "qwen2.5:7b"
-    OLLAMA_EMBEDDING_MODEL: str = "qwen3-embedding-8b"
+    OLLAMA_EMBEDDING_MODEL: str = "qwen3-embedding:4b"
+
+    # HuggingFace Embedding
+    HF_EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    HF_EMBEDDING_DEVICE: str = "cpu"
+    HF_NORMALIZE_EMBEDDINGS: bool = True
 
     # Vector Store
     CHROMA_PERSIST_DIR: str = "./chroma_db"

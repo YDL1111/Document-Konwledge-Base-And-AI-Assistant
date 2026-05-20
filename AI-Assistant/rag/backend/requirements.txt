@@ -7,8 +7,15 @@ python-multipart==0.0.12
 langchain==0.3.9
 langchain-community==0.3.9
 langchain-core==0.3.21
-langchain-ollama==0.2.1
 langchain-chroma==0.1.4
+langchain-openai>=0.2
+openai>=1.0
+
+# Embedding Providers
+langchain-ollama==0.2.1
+langchain-huggingface>=0.1
+sentence-transformers>=3.0
+torch>=2.3
 
 # Vector Store
 chromadb==0.5.3
@@ -20,14 +27,11 @@ pymysql==1.1.1
 alembic==1.14.0
 
 # Document Parsing
-pypdf==5.1.0
+PyMuPDF>=1.24
 python-docx==1.1.2
 openpyxl==3.1.5
-xlrd==2.0.1
 python-pptx==1.0.2
 pillow==11.0.0
-paddleocr==2.9.1
-paddlepaddle==2.6.2
 
 # Utilities
 pydantic==2.10.3
