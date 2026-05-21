@@ -103,3 +103,14 @@ docbase:
     # 前端url请求转发前缀
     api-prefix: /dev-api
     demo-enabled: false
+    ai:
+        python:
+            base-url: http://localhost:8000
+            api-key:
+            connect-timeout-ms: 3000
+            read-timeout-ms: 120000
+        kb-mapping:
+            default-kb-id: 5
+            category-mappings:
+                1: 5    # Study
+                9: 5    # Java

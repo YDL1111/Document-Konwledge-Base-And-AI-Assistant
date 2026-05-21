@@ -2,6 +2,7 @@
 Vector store service based on ChromaDB.
 """
 import asyncio
+import os
 import time
 import uuid
 from typing import List, Optional, Tuple
@@ -19,6 +20,11 @@ from app.core.config import settings
 from app.services.cache import embedding_cache
 
 
+# Prefer local cached Hugging Face artifacts in this desktop setup.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+
 class AsyncEmbeddingWrapper:
     def __init__(self):
         self._emb = None
@@ -29,7 +35,10 @@ class AsyncEmbeddingWrapper:
             if settings.EMBEDDING_PROVIDER.lower() == "huggingface":
                 self._emb = HuggingFaceEmbeddings(
                     model_name=settings.HF_EMBEDDING_MODEL,
-                    model_kwargs={"device": settings.HF_EMBEDDING_DEVICE},
+                    model_kwargs={
+                        "device": settings.HF_EMBEDDING_DEVICE,
+                        "local_files_only": settings.HF_LOCAL_FILES_ONLY,
+                    },
                     encode_kwargs={
                         "normalize_embeddings": settings.HF_NORMALIZE_EMBEDDINGS
                     },

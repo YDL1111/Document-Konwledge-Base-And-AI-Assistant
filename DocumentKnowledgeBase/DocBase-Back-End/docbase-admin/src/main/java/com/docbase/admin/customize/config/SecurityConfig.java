@@ -12,6 +12,7 @@ import com.docbase.common.utils.ServletHolderUtil;
 import com.docbase.domain.common.cache.RedisCacheService;
 import com.docbase.infrastructure.thread.ThreadPoolManager;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -95,6 +96,7 @@ public class SecurityConfig {
             .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler()))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers("/login", "/register", "/getConfig", "/captchaImage", "/api/**").anonymous()
                 .requestMatchers(HttpMethod.GET, "/", "/*.html", "/**/*.html", "/**/*.css", "/**/*.js",
                     "/profile/avatar/**", "/profile/document/**").permitAll()

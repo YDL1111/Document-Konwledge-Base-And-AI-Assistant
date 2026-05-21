@@ -42,5 +42,7 @@ springdoc:
       packages-to-scan: com.docbase.admin.controller.common
     - group: '内置系统API'
       packages-to-scan: com.docbase.admin.controller.system
+    - group: 'AI问答API'
+      packages-to-scan: com.docbase.admin.controller.ai
 
 

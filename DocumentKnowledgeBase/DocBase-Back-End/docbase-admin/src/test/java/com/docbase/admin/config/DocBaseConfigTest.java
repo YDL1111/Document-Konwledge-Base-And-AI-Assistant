@@ -5,7 +5,7 @@ import com.docbase.admin.DocBaseAdminApplication;
 import com.docbase.common.config.DocBaseConfig;
 import com.docbase.common.constant.Constants.UploadSubDir;
 import java.io.File;
-import javax.annotation.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.Test;
 import org.junit.jupiter.api.Assertions;
 import org.junit.runner.RunWith;
@@ -16,7 +16,7 @@ import org.springframework.test.context.junit4.SpringRunner;
 @RunWith(SpringRunner.class)
 public class DocBaseConfigTest {
 
-    @Resource
+    @Autowired
     private DocBaseConfig config;
 
     @Test

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     HF_EMBEDDING_MODEL: str = "BAAI/bge-m3"
     HF_EMBEDDING_DEVICE: str = "cpu"
     HF_NORMALIZE_EMBEDDINGS: bool = True
+    HF_LOCAL_FILES_ONLY: bool = True
 
     # Vector Store
     CHROMA_PERSIST_DIR: str = "./chroma_db"

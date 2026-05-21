@@ -171,6 +171,9 @@ class RAGService:
     ) -> AsyncGenerator[str, None]:
         history = history or []
 
+        # Emit an early event so upstream SSE clients do not time out while retrieval starts.
+        yield f"data: {json.dumps({'type': 'start', 'data': 'processing'}, ensure_ascii=False)}\n\n"
+
         results, _ = await self.retrieve(
             kb_id=kb_id,
             query=question,

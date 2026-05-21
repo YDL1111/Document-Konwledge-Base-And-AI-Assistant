@@ -30,6 +30,9 @@ public class AiChatSessionEntity extends BaseEntity<AiChatSessionEntity> {
     @TableField("last_message_time")
     private Date lastMessageTime;
 
+    @TableField("python_conv_id")
+    private Integer pythonConvId;
+
     @TableField("`status`")
     private Integer status;
 
