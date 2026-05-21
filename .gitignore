@@ -64,6 +64,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Claude Code
+.claude/
+
 # 日志文件
 logs/
 *.log

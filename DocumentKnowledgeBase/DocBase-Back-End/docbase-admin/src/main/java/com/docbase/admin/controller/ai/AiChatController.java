@@ -13,9 +13,10 @@ import com.docbase.infrastructure.user.AuthenticationUtils;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
-import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,7 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-@Tag(name = "AI问答API", description = "AI问答会话相关接口")
+@Tag(name = "AI Chat API", description = "AI chat session endpoints")
 @RestController
 @RequestMapping("/ai/chat")
 @RequiredArgsConstructor
@@ -32,7 +33,7 @@ public class AiChatController extends BaseController {
 
     private final AiChatApplicationService aiChatApplicationService;
 
-    @Operation(summary = "AI问答会话列表")
+    @Operation(summary = "List AI chat sessions")
     @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/sessions")
     public ResponseDTO<PageDTO<AiChatSessionDTO>> list(AiChatSessionQuery query) {
@@ -40,14 +41,23 @@ public class AiChatController extends BaseController {
         return ResponseDTO.ok(aiChatApplicationService.getSessionList(query));
     }
 
-    @Operation(summary = "AI问答消息历史")
+    @Operation(summary = "Get AI chat history")
     @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseDTO<List<AiChatMessageDTO>> getMessages(@PathVariable Long sessionId) {
         return ResponseDTO.ok(aiChatApplicationService.getMessages(sessionId));
     }
 
-    @Operation(summary = "AI问答查询")
+    @Operation(summary = "Delete AI chat session")
+    @PreAuthorize("@permission.has('ai:chat:list')")
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseDTO<String> deleteSession(@PathVariable Long sessionId) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        aiChatApplicationService.deleteSession(sessionId, loginUser);
+        return ResponseDTO.ok("删除成功");
+    }
+
+    @Operation(summary = "Query AI chat")
     @PreAuthorize("@permission.has('ai:chat:query')")
     @PostMapping("/query")
     public ResponseDTO<AiChatAnswerDTO> query(@RequestBody AiChatQueryRequest request) {
@@ -56,7 +66,7 @@ public class AiChatController extends BaseController {
         return ResponseDTO.ok(answer);
     }
 
-    @Operation(summary = "AI闂瓟娴佸紡鏌ヨ")
+    @Operation(summary = "Stream AI chat response")
     @PreAuthorize("@permission.has('ai:chat:query')")
     @PostMapping("/stream")
     public SseEmitter stream(@RequestBody AiChatQueryRequest request) {

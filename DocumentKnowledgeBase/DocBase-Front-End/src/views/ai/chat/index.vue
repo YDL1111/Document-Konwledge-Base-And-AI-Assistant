@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { ChatDotRound, Plus, Promotion, MagicStick } from "@element-plus/icons-vue";
+import { ChatDotRound, Delete, MagicStick, Plus, Promotion } from "@element-plus/icons-vue";
 import {
+  deleteAiChatSessionApi,
   getAiChatMessagesApi,
   getAiChatSessionsApi,
   getAiChatStreamUrl
 } from "@/api/ai/chat";
 import type {
-  AiChatAnswerDTO,
   AiChatMessageDTO,
   AiChatQueryRequest,
   AiChatSessionDTO,
@@ -40,24 +40,27 @@ interface StreamEvent {
 const quickPrompts = [
   "帮我总结当前知识库最重要的三部分内容",
   "基于文档内容给我一份面试问答清单",
-  "把复杂概念用适合新人理解的方式解释一下"
+  "把复杂概念用适合新人的方式解释一遍"
 ];
 
 const question = ref("");
 const loading = ref(false);
 const loadingHistory = ref(false);
 const loadingSessions = ref(false);
-const messages = ref<ChatMessage[]>([]);
+const deletingSessionId = ref<number>();
 const sessions = ref<AiChatSessionDTO[]>([]);
+const messages = ref<ChatMessage[]>([]);
 const currentSessionId = ref<number>();
 const pageRootRef = ref<HTMLElement>();
 const messagesContainer = ref<HTMLElement>();
 const textareaRef = ref<HTMLTextAreaElement>();
 const pageHeight = ref("calc(100vh - 96px)");
+
 let currentAbortController: AbortController | null = null;
+let streamSessionListSynced = false;
 
 const currentSessionIdStr = computed(() =>
-  currentSessionId.value != null ? String(currentSessionId.value) : null
+  currentSessionId.value != null ? String(currentSessionId.value) : ""
 );
 
 const escapeHtml = (value: string) =>
@@ -68,13 +71,15 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const formatInlineMarkdown = (text: string) => {
-  return text
+const formatInlineMarkdown = (text: string) =>
+  text
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-};
+    .replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
 
 const renderMarkdown = (content: string) => {
   if (!content) return "";
@@ -94,7 +99,7 @@ const renderMarkdown = (content: string) => {
   const html: string[] = [];
   let inList = false;
   let listType: "ul" | "ol" | null = null;
-  let inBlockquote = false;
+  let inQuote = false;
 
   const closeList = () => {
     if (inList && listType) {
@@ -105,9 +110,9 @@ const renderMarkdown = (content: string) => {
   };
 
   const closeQuote = () => {
-    if (inBlockquote) {
+    if (inQuote) {
       html.push("</blockquote>");
-      inBlockquote = false;
+      inQuote = false;
     }
   };
 
@@ -130,9 +135,9 @@ const renderMarkdown = (content: string) => {
 
     if (trimmed.startsWith(">")) {
       closeList();
-      if (!inBlockquote) {
+      if (!inQuote) {
         html.push("<blockquote>");
-        inBlockquote = true;
+        inQuote = true;
       }
       html.push(`<p>${formatInlineMarkdown(escapeHtml(trimmed.replace(/^>\s?/, "")))}</p>`);
       return;
@@ -195,12 +200,11 @@ const renderMarkdown = (content: string) => {
 
 const scrollToBottom = async (smooth = false) => {
   await nextTick();
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTo({
-      top: messagesContainer.value.scrollHeight,
-      behavior: smooth ? "smooth" : "auto"
-    });
-  }
+  if (!messagesContainer.value) return;
+  messagesContainer.value.scrollTo({
+    top: messagesContainer.value.scrollHeight,
+    behavior: smooth ? "smooth" : "auto"
+  });
 };
 
 const syncViewportLayout = () => {
@@ -235,72 +239,159 @@ const formatSourceTitle = (source: SourceInfo) =>
 
 const formatScore = (score: number) => `${((score || 0) * 100).toFixed(0)}%`;
 
-const loadSessionList = async () => {
-  loadingSessions.value = true;
-  try {
-    const res = await getAiChatSessionsApi({ pageNum: 1, pageSize: 50 });
-    if (res.code === 0 && res.data) {
-      sessions.value = res.data.rows ?? [];
-    }
-  } catch {
-    // ignore
-  } finally {
-    loadingSessions.value = false;
-  }
-};
-
 const normalizeHistoryMessage = (dto: AiChatMessageDTO): ChatMessage => ({
   id: String(dto.messageId),
   role: dto.messageRole === 1 ? "user" : "assistant",
-  content: dto.messageContent,
+  content: dto.messageContent || "",
   sources: dto.sources ?? undefined,
   isError: dto.messageRole === 2 && !dto.messageContent,
   expanded: false,
   streaming: false
 });
 
+const abortStreaming = () => {
+  if (loading.value) {
+    currentAbortController?.abort();
+  }
+};
+
+const loadSessionList = async () => {
+  loadingSessions.value = true;
+  try {
+    const res = await getAiChatSessionsApi({ pageNum: 1, pageSize: 50 });
+    if (res.code === 0 && res.data) {
+      sessions.value = res.data.rows ?? [];
+    } else {
+      ElMessage.error(res.msg || "加载会话列表失败");
+    }
+  } catch {
+    ElMessage.error("加载会话列表失败");
+  } finally {
+    loadingSessions.value = false;
+  }
+};
+
+const resolveNewSessionId = (
+  previousSessionIds: number[],
+  questionText: string
+) => {
+  const previousIdSet = new Set(previousSessionIds);
+  const created = sessions.value.find(item => !previousIdSet.has(item.sessionId));
+  if (created) return created.sessionId;
+
+  const fallbackTitle = questionText.length > 20 ? `${questionText.slice(0, 20)}...` : questionText;
+  return sessions.value.find(item => item.sessionTitle === fallbackTitle)?.sessionId;
+};
+
 const loadHistory = async (sessionId: number) => {
   loadingHistory.value = true;
   try {
     const res = await getAiChatMessagesApi(sessionId);
     if (res.code === 0 && res.data) {
-      messages.value = res.data.map(normalizeHistoryMessage);
-      currentSessionId.value = sessionId;
-      sessionStorage.setItem(SESSION_STORAGE_KEY, String(sessionId));
+      applyHistoryMessages(sessionId, res.data);
     } else {
-      ElMessage.error(res.msg || "加载历史消息失败");
+      throw new Error(res.msg || "加载历史消息失败");
     }
   } catch {
+    if (currentSessionId.value === sessionId) {
+      currentSessionId.value = undefined;
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      messages.value = [];
+    }
     ElMessage.error("加载历史消息失败，可继续发送新消息");
   } finally {
     loadingHistory.value = false;
-    scrollToBottom();
+    await scrollToBottom();
   }
 };
 
-const selectSession = (sessionId: number) => {
-  if (loading.value || currentSessionId.value === sessionId) return;
-  loadHistory(sessionId);
+const syncHistoryAfterStream = async (sessionId: number, expectedAnswer: string) => {
+  const normalizedExpected = expectedAnswer.trim();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const res = await getAiChatMessagesApi(sessionId);
+      if (res.code === 0 && res.data) {
+        const lastAssistant = [...res.data]
+          .reverse()
+          .find(item => item.messageRole === 2);
+        const answer = lastAssistant?.messageContent?.trim() ?? "";
+
+        if (!normalizedExpected) {
+          if (answer) {
+            applyHistoryMessages(sessionId, res.data);
+            return;
+          }
+        } else if (answer === normalizedExpected || answer.length >= normalizedExpected.length) {
+          applyHistoryMessages(sessionId, res.data);
+          return;
+        }
+      }
+    } catch {
+      break;
+    }
+
+    await new Promise(resolve => window.setTimeout(resolve, 250));
+  }
+
+  try {
+    await loadHistory(sessionId);
+  } catch {
+    // Keep the in-memory stream result if history sync still fails.
+  }
 };
 
-const newSession = () => {
-  currentSessionId.value = undefined;
-  sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  messages.value = [];
-};
-
-const onSessionListReady = () => {
+const onSessionListReady = async () => {
   const saved = sessionStorage.getItem(SESSION_STORAGE_KEY);
   if (!saved) return;
+
   const sessionId = Number(saved);
   if (Number.isNaN(sessionId)) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     return;
   }
-  if (sessions.value.some(s => s.sessionId === sessionId)) {
-    loadHistory(sessionId);
+
+  if (sessions.value.some(item => item.sessionId === sessionId)) {
+    await loadHistory(sessionId);
   } else {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+};
+
+const selectSession = async (sessionId: number) => {
+  if (currentSessionId.value === sessionId) return;
+  abortStreaming();
+  await loadHistory(sessionId);
+};
+
+const newSession = () => {
+  abortStreaming();
+  currentSessionId.value = undefined;
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  messages.value = [];
+};
+
+const deleteSession = async (session: AiChatSessionDTO) => {
+  deletingSessionId.value = session.sessionId;
+  try {
+    const res = await deleteAiChatSessionApi(session.sessionId);
+    if (res.code !== 0) {
+      throw new Error(res.msg || "删除会话失败");
+    }
+
+    if (currentSessionId.value === session.sessionId) {
+      abortStreaming();
+      currentSessionId.value = undefined;
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      messages.value = [];
+    }
+
+    sessions.value = sessions.value.filter(item => item.sessionId !== session.sessionId);
+    ElMessage.success("会话已删除");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "删除会话失败");
+  } finally {
+    deletingSessionId.value = undefined;
   }
 };
 
@@ -310,12 +401,11 @@ const createStreamingAssistantMessage = () => {
     role: "assistant",
     content: "",
     sources: [],
-    isError: false,
     expanded: false,
     streaming: true
   };
   messages.value.push(aiMsg);
-  return aiMsg;
+  return messages.value[messages.value.length - 1]!;
 };
 
 const parseStreamEvent = (payload: string): StreamEvent | null => {
@@ -326,12 +416,49 @@ const parseStreamEvent = (payload: string): StreamEvent | null => {
   }
 };
 
-const handleStreamEvent = async (
-  event: StreamEvent,
-  aiMsg: ChatMessage,
-  isNewSession: boolean
-) => {
+const applyHistoryMessages = (sessionId: number, history: AiChatMessageDTO[]) => {
+  messages.value = history.map(normalizeHistoryMessage);
+  currentSessionId.value = sessionId;
+  sessionStorage.setItem(SESSION_STORAGE_KEY, String(sessionId));
+};
+
+const extractSseBlocks = (buffer: string) => {
+  const normalized = buffer.replace(/\r\n/g, "\n");
+  const blocks = normalized.split("\n\n");
+  return {
+    completeBlocks: blocks.slice(0, -1),
+    remainder: blocks[blocks.length - 1] ?? ""
+  };
+};
+
+const parseSseBlock = (block: string): StreamEvent | null => {
+  const dataLines = block
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line.startsWith("data:"))
+    .map(line => line.slice(5).trimStart());
+
+  if (!dataLines.length) return null;
+
+  return parseStreamEvent(dataLines.join("\n"));
+};
+
+const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSession: boolean) => {
   switch (event.type) {
+    case "start":
+      break;
+    case "conv_id":
+      if (typeof event.data === "number") {
+        currentSessionId.value = event.data;
+        sessionStorage.setItem(SESSION_STORAGE_KEY, String(event.data));
+        if (isNewSession && !streamSessionListSynced) {
+          streamSessionListSynced = true;
+          await loadSessionList();
+        }
+      }
+      break;
+    case "python_conv_id":
+      break;
     case "token":
       aiMsg.content += String(event.data ?? "");
       await scrollToBottom();
@@ -339,37 +466,30 @@ const handleStreamEvent = async (
     case "sources":
       aiMsg.sources = (event.data as SourceInfo[]) ?? [];
       break;
-    case "conv_id":
-      if (typeof event.data === "number") {
-        currentSessionId.value = event.data;
-        sessionStorage.setItem(SESSION_STORAGE_KEY, String(event.data));
-        if (isNewSession) {
-          await loadSessionList();
-        }
-      }
-      break;
-    case "python_conv_id":
-      break;
-    case "start":
-      break;
     case "done": {
-      const data = event.data as { answer?: string; sources?: SourceInfo[] } | null;
-      if (data?.answer) {
-        aiMsg.content = data.answer;
-      }
-      if (data?.sources) {
-        aiMsg.sources = data.sources;
+      const data = event.data as { answer?: string; sources?: SourceInfo[] } | string | null;
+      if (typeof data === "string") {
+        aiMsg.content = data;
+      } else {
+        if (data?.answer != null) {
+          aiMsg.content = data.answer;
+        }
+        if (data?.sources) {
+          aiMsg.sources = data.sources;
+        }
       }
       aiMsg.streaming = false;
       await scrollToBottom();
       break;
     }
-    case "error":
+    case "error": {
+      const message = String(event.data ?? "AI 服务暂时不可用，请稍后重试");
       aiMsg.isError = true;
       aiMsg.streaming = false;
-      aiMsg.content = String(event.data ?? "AI 服务暂时不可用");
+      aiMsg.content = message;
       await scrollToBottom();
-      throw new Error(aiMsg.content);
+      throw new Error(message);
+    }
     default:
       break;
   }
@@ -397,25 +517,32 @@ const streamAnswer = async (payload: AiChatQueryRequest, aiMsg: ChatMessage, isN
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+  const processBlock = async (block: string) => {
+    const event = parseSseBlock(block);
+    if (!event) return;
+    await handleStreamEvent(event, aiMsg, isNewSession);
+  };
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
     buffer += decoder.decode(value, { stream: true });
+    const { completeBlocks, remainder } = extractSseBlocks(buffer);
+    buffer = remainder;
 
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() || "";
-
-    for (const chunk of chunks) {
-      const dataLine = chunk
-        .split("\n")
-        .map(line => line.trim())
-        .find(line => line.startsWith("data: "));
-      if (!dataLine) continue;
-      const event = parseStreamEvent(dataLine.slice(6));
-      if (!event) continue;
-      await handleStreamEvent(event, aiMsg, isNewSession);
+    for (const block of completeBlocks) {
+      await processBlock(block);
     }
+  }
+
+  buffer += decoder.decode();
+  const { completeBlocks, remainder } = extractSseBlocks(`${buffer}\n\n`);
+  for (const block of completeBlocks) {
+    await processBlock(block);
+  }
+  if (remainder.trim()) {
+    await processBlock(remainder);
   }
 };
 
@@ -423,7 +550,9 @@ const send = async () => {
   const text = question.value.trim();
   if (!text || loading.value) return;
 
+  streamSessionListSynced = false;
   const isNewSession = currentSessionId.value == null;
+  const previousSessionIds = isNewSession ? sessions.value.map(item => item.sessionId) : [];
   loading.value = true;
 
   messages.value.push({
@@ -447,10 +576,23 @@ const send = async () => {
       aiMsg,
       isNewSession
     );
-    if (currentSessionId.value != null) {
-      await loadHistory(currentSessionId.value);
+    if (isNewSession && currentSessionId.value == null) {
+      await loadSessionList();
+      const resolvedSessionId = resolveNewSessionId(previousSessionIds, text);
+      if (resolvedSessionId != null) {
+        currentSessionId.value = resolvedSessionId;
+        sessionStorage.setItem(SESSION_STORAGE_KEY, String(resolvedSessionId));
+      }
     }
+    if (currentSessionId.value != null) {
+      await syncHistoryAfterStream(currentSessionId.value, aiMsg.content);
+    }
+
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+
     aiMsg.isError = true;
     aiMsg.streaming = false;
     if (!aiMsg.content) {
@@ -476,7 +618,7 @@ const handleEnter = (event: KeyboardEvent) => {
 
 onMounted(async () => {
   await loadSessionList();
-  onSessionListReady();
+  await onSessionListReady();
   resizeTextarea();
   syncViewportLayout();
   window.addEventListener("resize", syncViewportLayout);
@@ -498,7 +640,7 @@ onBeforeUnmount(() => {
           <h2>AI 对话</h2>
         </div>
         <el-button type="primary" class="new-session-btn" :icon="Plus" :disabled="loading" @click="newSession">
-          新建会话
+          新会话
         </el-button>
       </div>
 
@@ -509,7 +651,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="overview-card">
           <span class="overview-label">回答模式</span>
-          <strong>流式增强</strong>
+          <strong>流式输出</strong>
         </div>
       </div>
 
@@ -527,10 +669,31 @@ onBeforeUnmount(() => {
           :class="{ 'session-item--active': currentSessionIdStr === String(session.sessionId) }"
           @click="selectSession(session.sessionId)"
         >
-          <span class="session-item__icon">
-            <el-icon><ChatDotRound /></el-icon>
+          <span class="session-item__main">
+            <span class="session-item__icon">
+              <el-icon><ChatDotRound /></el-icon>
+            </span>
+            <span class="session-title">{{ session.sessionTitle }}</span>
           </span>
-          <span class="session-title">{{ session.sessionTitle }}</span>
+
+          <el-popconfirm
+            width="220"
+            title="确认删除这个历史会话吗？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="deleteSession(session)"
+          >
+            <template #reference>
+              <el-button
+                class="session-delete-btn"
+                text
+                circle
+                :icon="Delete"
+                :loading="deletingSessionId === session.sessionId"
+                @click.stop
+              />
+            </template>
+          </el-popconfirm>
         </button>
       </div>
     </aside>
@@ -540,7 +703,9 @@ onBeforeUnmount(() => {
         <div>
           <p class="chat-header__kicker">Knowledge-grounded assistant</p>
           <h1>AI 问答工作台</h1>
-          <p class="chat-header__hint">支持 Markdown 渲染与流式输出，回答会更像真正的聊天产品。</p>
+          <p class="chat-header__hint">
+            支持流式输出、Markdown 渲染与来源回显，回答会像真实聊天一样逐步出现。
+          </p>
         </div>
         <div class="chat-header__status">
           <span class="chat-header__dot"></span>
@@ -576,9 +741,7 @@ onBeforeUnmount(() => {
           class="message-row"
           :class="msg.role === 'user' ? 'message-row--user' : 'message-row--ai'"
         >
-          <template v-if="msg.role === 'assistant'">
-            <div class="assistant-avatar">AI</div>
-          </template>
+          <div v-if="msg.role === 'assistant'" class="assistant-avatar">AI</div>
 
           <div class="message-stack">
             <div
@@ -616,6 +779,7 @@ onBeforeUnmount(() => {
                   <span>{{ msg.expanded ? "收起引用来源" : "查看引用来源" }}</span>
                   <em>{{ msg.sources.length }}</em>
                 </button>
+
                 <div v-if="msg.expanded" class="sources-list">
                   <div v-for="(src, idx) in msg.sources" :key="idx" class="source-card">
                     <div class="source-card__index">{{ idx + 1 }}</div>
@@ -640,18 +804,26 @@ onBeforeUnmount(() => {
             <span class="composer-tag">Stream response</span>
             <span class="composer-tip">Enter 发送，Shift + Enter 换行</span>
           </div>
+
           <div class="chat-composer__body">
             <textarea
               ref="textareaRef"
               v-model="question"
               class="chat-textarea"
-              placeholder="输入你的问题，让 AI 基于知识库逐字生成更可靠的回答。"
+              placeholder="输入你的问题，让 AI 基于知识库逐步生成回答。"
               :disabled="loading"
               rows="1"
               @input="resizeTextarea"
               @keydown.enter="handleEnter"
             />
-            <el-button type="primary" class="send-btn" :icon="Promotion" :loading="loading" :disabled="!question.trim()" @click="send">
+            <el-button
+              type="primary"
+              class="send-btn"
+              :icon="Promotion"
+              :loading="loading"
+              :disabled="!question.trim()"
+              @click="send"
+            >
               {{ loading ? "生成中" : "发送" }}
             </el-button>
           </div>
@@ -778,83 +950,97 @@ onBeforeUnmount(() => {
 .session-empty {
   display: flex;
   flex-direction: column;
+  gap: 10px;
   align-items: center;
-  padding: 32px 18px;
+  justify-content: center;
+  min-height: 200px;
+  padding: 24px 18px;
   text-align: center;
   color: var(--text-sub);
 }
 
 .session-empty__badge {
-  width: 44px;
-  height: 44px;
-  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
   border-radius: 14px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 44px;
-}
-
-.session-empty p,
-.session-empty span {
-  margin: 0;
 }
 
 .session-empty p {
+  margin: 0;
   color: var(--text-main);
   font-weight: 600;
 }
 
 .session-empty span {
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .session-item {
-  width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
   margin-bottom: 8px;
-  padding: 14px;
+  padding: 12px 12px 12px 10px;
   border: 1px solid transparent;
   border-radius: 18px;
   background: transparent;
   color: var(--text-main);
-  text-align: left;
   cursor: pointer;
   transition: 0.2s ease;
+  text-align: left;
 }
 
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.56);
-  border-color: var(--line-soft);
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(191, 90, 54, 0.1);
 }
 
 .session-item--active {
-  background: linear-gradient(180deg, rgba(255, 248, 242, 0.95), rgba(255, 244, 235, 0.9));
-  border-color: rgba(191, 90, 54, 0.16);
-  box-shadow: 0 12px 24px rgba(191, 90, 54, 0.08);
+  background: rgba(191, 90, 54, 0.08);
+  border-color: rgba(191, 90, 54, 0.18);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.session-item__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
 }
 
 .session-item__icon {
+  display: grid;
+  place-items: center;
   width: 34px;
   height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--accent-strong);
   flex-shrink: 0;
 }
 
 .session-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.session-delete-btn {
+  color: #a96a58;
+  flex-shrink: 0;
 }
 
 .chat-main {
@@ -862,9 +1048,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
   border: 1px solid var(--line-soft);
-  border-radius: 34px;
+  border-radius: 30px;
   background: var(--bg-panel-strong);
   box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(20px);
   overflow: hidden;
 }
 
@@ -873,34 +1060,32 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding: 28px 34px 18px;
+  padding: 26px 30px 20px;
   border-bottom: 1px solid var(--line-soft);
 }
 
 .chat-header h1 {
-  font-size: 40px;
-  line-height: 1.02;
+  font-size: 38px;
+  line-height: 1.05;
 }
 
 .chat-header__hint {
+  margin: 12px 0 0;
   max-width: 700px;
-  margin: 10px 0 0;
   color: var(--text-sub);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.8;
 }
 
 .chat-header__status {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 8px;
   padding: 10px 14px;
-  border: 1px solid var(--line-soft);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text-sub);
-  font-size: 13px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text-main);
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -908,83 +1093,69 @@ onBeforeUnmount(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #41b66d;
-  box-shadow: 0 0 0 6px rgba(65, 182, 109, 0.12);
+  background: #28b463;
+  box-shadow: 0 0 0 4px rgba(40, 180, 99, 0.14);
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  padding: 28px 30px;
   min-height: 0;
-  padding: 28px 34px;
 }
 
-.chat-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 320px;
-  text-align: center;
+.chat-empty,
+.chat-welcome {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .empty-title {
   margin: 0;
   color: var(--text-sub);
-  font-size: 18px;
 }
 
 .chat-welcome {
   position: relative;
-  min-height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 0;
 }
 
 .chat-welcome__halo {
   position: absolute;
-  width: 340px;
-  height: 340px;
+  width: 360px;
+  height: 360px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(222, 152, 110, 0.18), transparent 68%);
-  filter: blur(8px);
+  background: radial-gradient(circle, rgba(191, 90, 54, 0.12), transparent 68%);
+  filter: blur(4px);
 }
 
 .chat-welcome__panel {
   position: relative;
-  z-index: 1;
-  max-width: 760px;
-  padding: 34px;
+  width: min(680px, 100%);
+  padding: 34px 32px;
   border: 1px solid rgba(191, 90, 54, 0.12);
-  border-radius: 30px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 248, 241, 0.84));
-  text-align: left;
-  box-shadow: 0 24px 80px rgba(86, 53, 26, 0.08);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 18px 60px rgba(74, 45, 24, 0.08);
+  text-align: center;
 }
 
 .chat-welcome__icon {
-  width: 62px;
-  height: 62px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(191, 90, 54, 0.16), rgba(143, 63, 36, 0.1));
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(191, 90, 54, 0.12), rgba(143, 63, 36, 0.2));
   color: var(--accent-strong);
   font-size: 28px;
 }
 
-.chat-welcome h3 {
-  font-size: 34px;
-  line-height: 1.1;
-}
-
-.chat-welcome p {
-  margin: 12px 0 0;
+.chat-welcome__panel p {
+  margin: 10px auto 0;
+  max-width: 560px;
   color: var(--text-sub);
-  font-size: 15px;
   line-height: 1.8;
 }
 
@@ -992,32 +1163,28 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 26px;
+  margin-top: 24px;
 }
 
 .prompt-chip {
-  min-height: 84px;
-  padding: 16px;
+  padding: 14px 14px;
   border: 1px solid rgba(191, 90, 54, 0.14);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  background: rgba(255, 251, 247, 0.9);
   color: var(--text-main);
-  font-size: 14px;
   line-height: 1.6;
-  text-align: left;
   cursor: pointer;
   transition: 0.2s ease;
 }
 
 .prompt-chip:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: rgba(191, 90, 54, 0.28);
-  box-shadow: 0 16px 30px rgba(191, 90, 54, 0.08);
+  box-shadow: 0 12px 22px rgba(75, 46, 25, 0.08);
 }
 
 .message-row {
   display: flex;
-  align-items: flex-start;
   gap: 14px;
   margin-bottom: 22px;
 }
@@ -1026,68 +1193,60 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-.message-row--user .message-stack {
-  align-items: flex-end;
+.message-stack {
+  max-width: min(860px, 88%);
 }
 
 .assistant-avatar {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #c56b43, #8f3f24);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   color: #fff;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
   flex-shrink: 0;
-  box-shadow: 0 12px 26px rgba(197, 107, 67, 0.2);
-}
-
-.message-stack {
-  max-width: min(78%, 860px);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .message-bubble {
   position: relative;
-  padding: 16px 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 22px 22px 22px 10px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 14px 34px rgba(60, 38, 22, 0.06);
+  padding: 14px 16px 16px;
+  border: 1px solid rgba(81, 58, 42, 0.08);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 30px rgba(75, 46, 25, 0.04);
 }
 
 .message-bubble--user {
+  background: linear-gradient(135deg, #d66a42, #a94928);
   border-color: transparent;
-  border-radius: 22px 22px 10px 22px;
-  background: linear-gradient(135deg, #c86a45, #a14a2a);
   color: #fff;
 }
 
 .message-bubble--error {
-  border-color: rgba(196, 68, 54, 0.2);
-  background: #fff2ef;
-  color: #8d3026;
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 
 .message-meta {
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(124, 105, 89, 0.88);
+  opacity: 0.74;
 }
 
-.message-bubble--user .message-meta {
-  color: rgba(255, 255, 255, 0.78);
+.message-content {
+  font-size: 14px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.message-content,
 .message-markdown {
   color: inherit;
   font-size: 14px;
@@ -1095,16 +1254,12 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-.message-content {
-  white-space: pre-wrap;
-}
-
 .message-markdown :deep(p),
 .message-markdown :deep(ul),
 .message-markdown :deep(ol),
 .message-markdown :deep(blockquote),
 .message-markdown :deep(pre) {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
 }
 
 .message-markdown :deep(p:last-child),
@@ -1115,134 +1270,93 @@ onBeforeUnmount(() => {
   margin-bottom: 0;
 }
 
-.message-markdown :deep(h1),
-.message-markdown :deep(h2),
-.message-markdown :deep(h3) {
-  margin: 0 0 12px;
-  color: var(--text-main);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.message-markdown :deep(h1) {
-  font-size: 20px;
-}
-
-.message-markdown :deep(h2) {
-  font-size: 18px;
-}
-
-.message-markdown :deep(h3) {
-  font-size: 16px;
-}
-
-.message-markdown :deep(ul),
-.message-markdown :deep(ol) {
-  padding-left: 20px;
-}
-
-.message-markdown :deep(li) {
-  margin-bottom: 6px;
-}
-
-.message-markdown :deep(blockquote) {
-  padding: 10px 14px;
-  border-left: 3px solid rgba(191, 90, 54, 0.35);
-  border-radius: 0 14px 14px 0;
-  background: rgba(191, 90, 54, 0.06);
-  color: var(--text-sub);
-}
-
 .message-markdown :deep(code) {
   padding: 2px 6px;
   border-radius: 6px;
-  background: rgba(81, 58, 42, 0.08);
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
+  background: rgba(52, 36, 24, 0.08);
+  font-size: 13px;
+}
+
+.message-markdown :deep(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.message-markdown :deep(blockquote) {
+  padding-left: 12px;
+  border-left: 3px solid rgba(191, 90, 54, 0.3);
+  color: var(--text-sub);
 }
 
 .message-markdown :deep(.md-code) {
   overflow-x: auto;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: #241b16;
-  color: #f8ede1;
-}
-
-.message-markdown :deep(.md-code__lang) {
-  margin-bottom: 10px;
-  color: rgba(248, 237, 225, 0.72);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  padding: 12px;
+  border-radius: 14px;
+  background: #1f1a17;
+  color: #f8ede5;
 }
 
 .message-markdown :deep(.md-code code) {
   padding: 0;
   background: transparent;
   color: inherit;
-  font-size: 13px;
-  line-height: 1.7;
 }
 
-.message-markdown :deep(a) {
-  color: var(--accent-strong);
-  text-decoration: underline;
+.message-markdown :deep(.md-code__lang) {
+  margin-bottom: 8px;
+  color: #d5b5a1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .error-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
   width: 18px;
   height: 18px;
-  margin-right: 6px;
+  margin-right: 8px;
   border-radius: 50%;
-  background: #d65144;
+  background: #dc2626;
   color: #fff;
   font-size: 12px;
   font-weight: 700;
+  vertical-align: middle;
 }
 
 .stream-caret {
   width: 10px;
   height: 18px;
-  display: inline-block;
   margin-top: 8px;
-  border-right: 2px solid var(--accent-strong);
-  animation: blink-caret 1s step-end infinite;
+  border-radius: 999px;
+  background: currentColor;
+  animation: blink-caret 1s steps(2, jump-none) infinite;
+  opacity: 0.6;
 }
 
 .source-panel {
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.58);
+  margin-top: 10px;
   border: 1px solid rgba(81, 58, 42, 0.08);
-  overflow: hidden;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .source-toggle {
-  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 12px 14px;
   border: none;
   background: transparent;
-  color: var(--text-sub);
-  font-size: 13px;
+  color: var(--text-main);
   cursor: pointer;
 }
 
 .source-toggle em {
-  min-width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
   font-style: normal;
-  font-weight: 600;
-  line-height: 24px;
-  text-align: center;
+  font-weight: 700;
+  color: var(--accent-strong);
 }
 
 .sources-list {

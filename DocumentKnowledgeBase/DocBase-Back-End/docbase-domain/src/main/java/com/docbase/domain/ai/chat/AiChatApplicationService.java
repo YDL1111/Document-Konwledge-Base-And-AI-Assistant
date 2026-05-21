@@ -28,12 +28,14 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -68,6 +70,29 @@ public class AiChatApplicationService {
         return entities.stream()
                 .map(this::toMessageDTO)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteSession(Long sessionId, SystemLoginUser loginUser) {
+        AiChatSessionEntity session = aiChatSessionService.getById(sessionId);
+        if (session == null) {
+            return;
+        }
+
+        if (!loginUser.isAdmin() && !Objects.equals(session.getUserId(), loginUser.getUserId())) {
+            throw new IllegalArgumentException("You do not have permission to delete this session");
+        }
+
+        Integer pythonConvId = session.getPythonConvId();
+
+        aiChatMessageService.lambdaUpdate()
+                .eq(AiChatMessageEntity::getSessionId, sessionId)
+                .remove();
+        aiChatSessionService.removeById(sessionId);
+
+        if (pythonConvId != null) {
+            pythonAiClient.deleteConversation(pythonConvId);
+        }
     }
 
     public AiChatAnswerDTO query(AiChatQueryRequest request, SystemLoginUser loginUser) {
@@ -118,7 +143,7 @@ public class AiChatApplicationService {
                 .stream(true)
                 .build();
 
-        SseEmitter emitter = new SseEmitter(0L);
+        SseEmitter emitter = new SseEmitter();
 
         Thread streamThread = new Thread(() -> {
             UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
@@ -130,6 +155,7 @@ public class AiChatApplicationService {
             List<AiChatAnswerDTO.SourceInfo> finalSources = new ArrayList<>();
 
             try {
+                sendEvent(emitter, "conv_id", session.getSessionId());
                 pythonAiClient.streamMessage(pythonRequest, line -> {
                     try {
                         handlePythonStreamLine(line, session, emitter, answerBuilder, finalSources);
@@ -140,7 +166,6 @@ public class AiChatApplicationService {
 
                 updateSessionAfterQuery(session, request.getQuestion());
                 saveAssistantStreamMessage(session, kbId, answerBuilder.toString(), finalSources);
-                sendEvent(emitter, "conv_id", session.getSessionId());
                 sendEvent(emitter, "done", Map.of("answer", answerBuilder.toString(), "sources", finalSources));
                 emitter.complete();
             } catch (Exception e) {
@@ -342,11 +367,15 @@ public class AiChatApplicationService {
             SseEmitter emitter,
             StringBuilder answerBuilder,
             List<AiChatAnswerDTO.SourceInfo> finalSources) throws IOException {
-        if (line == null || line.isBlank() || !line.startsWith("data: ")) {
+        if (line == null || line.isBlank()) {
             return;
         }
 
-        String json = line.substring(6);
+        String json = extractSseData(line);
+        if (json == null || json.isBlank()) {
+            return;
+        }
+
         AiChatStreamEventDTO event = objectMapper.readValue(json, AiChatStreamEventDTO.class);
         if (event == null || event.getType() == null) {
             return;
@@ -385,6 +414,29 @@ public class AiChatApplicationService {
                 // Ignore done/unknown events from Python; Java emits final done after persistence.
             }
         }
+    }
+
+    private String extractSseData(String eventBlock) {
+        StringBuilder builder = new StringBuilder();
+        String[] lines = eventBlock.split("\\R");
+        for (String item : lines) {
+            if (item == null) {
+                continue;
+            }
+
+            String trimmed = item.trim();
+            if (!trimmed.startsWith("data:")) {
+                continue;
+            }
+
+            String value = trimmed.length() > 5 ? trimmed.substring(5).trim() : "";
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(value);
+        }
+
+        return builder.isEmpty() ? null : builder.toString();
     }
 
     private void sendEvent(SseEmitter emitter, String type, Object data) throws IOException {

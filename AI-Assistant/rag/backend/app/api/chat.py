@@ -180,4 +180,18 @@ def _get_or_create_conversation(db: Session, kb_id: int, conv_id: Optional[int],
 def _get_history(db: Session, conv_id: int) -> List[dict]:
     messages = db.query(Message).filter(Message.conv_id == conv_id) \
         .order_by(Message.created_at.asc()).limit(20).all()
-    return [{"role": m.role, "content": m.content} for m in messages]
+
+    history = []
+    pending_user = None
+
+    for message in messages:
+        if message.role == "user":
+            pending_user = {"role": "user", "content": message.content}
+            continue
+
+        if message.role == "assistant" and pending_user is not None:
+            history.append(pending_user)
+            history.append({"role": "assistant", "content": message.content})
+            pending_user = None
+
+    return history

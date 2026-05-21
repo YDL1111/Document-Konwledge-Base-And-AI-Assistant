@@ -53,6 +53,12 @@ public class KnowledgeIngestTaskEntity extends BaseEntity<KnowledgeIngestTaskEnt
     @TableField("finished_time")
     private Date finishedTime;
 
+    @TableField("python_kb_id")
+    private Integer pythonKbId;
+
+    @TableField("python_doc_id")
+    private Integer pythonDocId;
+
     @Override
     public Serializable pkVal() {
         return this.taskId;

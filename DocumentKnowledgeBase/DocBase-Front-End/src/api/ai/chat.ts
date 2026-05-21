@@ -16,6 +16,13 @@ export const getAiChatMessagesApi = (sessionId: number) => {
   );
 };
 
+export const deleteAiChatSessionApi = (sessionId: number) => {
+  return http.request<ResponseData<string>>(
+    "delete",
+    `/ai/chat/sessions/${sessionId}`
+  );
+};
+
 export const queryAiChatApi = (data: AiChatQueryRequest) => {
   return http.request<ResponseData<AiChatAnswerDTO>>(
     "post",

@@ -19,6 +19,8 @@ public class KnowledgeIngestTaskDTO {
     private String traceId;
     private Date startedTime;
     private Date finishedTime;
+    private Integer pythonKbId;
+    private Integer pythonDocId;
 
     public KnowledgeIngestTaskDTO(KnowledgeIngestTaskEntity entity) {
         if (entity != null) {
@@ -34,6 +36,8 @@ public class KnowledgeIngestTaskDTO {
             this.traceId = entity.getTraceId();
             this.startedTime = entity.getStartedTime();
             this.finishedTime = entity.getFinishedTime();
+            this.pythonKbId = entity.getPythonKbId();
+            this.pythonDocId = entity.getPythonDocId();
         }
     }
 }
