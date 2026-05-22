@@ -20,8 +20,13 @@ backend/logs/
 
 # Node
 node_modules/
+frontend/
 frontend/dist/
 frontend/.vite/
+
+# Demo frontend docs/assets
+README.md
+images/
 
 # IDE
 .idea/
