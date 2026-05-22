@@ -70,3 +70,9 @@ coverage/
 # 日志文件
 logs/
 *.log
+DocumentKnowledgeBase/DocBase-Back-End/sql/.idea/
+AI-Assistant/rag/backend/.env
+AI-Assistant/rag/backend/uploads/
+AI-Assistant/rag/backend/chroma_db/
+AI-Assistant/rag/backend/logs/
+AI-Assistant/rag/backend/venv/
