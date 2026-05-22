@@ -6,9 +6,11 @@ import {
   deleteAiChatSessionApi,
   getAiChatMessagesApi,
   getAiChatSessionsApi,
-  getAiChatStreamUrl
+  getAiChatStreamUrl,
+  getAiChatAgentStreamUrl
 } from "@/api/ai/chat";
 import type {
+  AgentTraceStep,
   AiChatMessageDTO,
   AiChatQueryRequest,
   AiChatSessionDTO,
@@ -30,6 +32,7 @@ interface ChatMessage {
   isError?: boolean;
   expanded?: boolean;
   streaming?: boolean;
+  agentTrace?: AgentTraceStep[];  // 按消息隔离的 Agent 执行轨迹
 }
 
 interface StreamEvent {
@@ -55,6 +58,9 @@ const pageRootRef = ref<HTMLElement>();
 const messagesContainer = ref<HTMLElement>();
 const textareaRef = ref<HTMLTextAreaElement>();
 const pageHeight = ref("calc(100vh - 96px)");
+
+// Agent mode
+const agentMode = ref(false);
 
 let currentAbortController: AbortController | null = null;
 let streamSessionListSynced = false;
@@ -450,6 +456,10 @@ const parseSseBlock = (block: string): StreamEvent | null => {
 const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSession: boolean) => {
   switch (event.type) {
     case "start":
+      // Agent mode: 初始化该消息的 trace
+      if (agentMode.value) {
+        aiMsg.agentTrace = [];
+      }
       break;
     case "conv_id":
       if (typeof event.data === "number") {
@@ -487,8 +497,30 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
     case "sources":
       aiMsg.sources = (event.data as SourceInfo[]) ?? [];
       break;
+    // Agent-specific events
+    case "step":
+      // step 事件用于前端感知进度，不阻塞
+      break;
+    case "tool_call":
+      aiMsg.agentTrace = aiMsg.agentTrace ?? [];
+      aiMsg.agentTrace.push({
+        step: aiMsg.agentTrace.length + 1,
+        message: `调用工具: ${(event.data as { tool?: string })?.tool ?? "未知"}`,
+        tool_call: event.data as AgentTraceStep["tool_call"]
+      });
+      break;
+    case "tool_result":
+      // 更新最近一个 trace 的 tool_result
+      if (aiMsg.agentTrace && aiMsg.agentTrace.length > 0) {
+        const last = aiMsg.agentTrace[aiMsg.agentTrace.length - 1];
+        if (last) {
+          last.tool_result = (event.data as AgentTraceStep["tool_result"]) ?? null;
+          last.message = `工具 ${last.tool_result?.tool ?? ""} ${last.tool_result?.success ? "完成" : "失败"}: ${last.tool_result?.summary ?? ""}`;
+        }
+      }
+      break;
     case "done": {
-      const data = event.data as { answer?: string; sources?: SourceInfo[] } | string | null;
+      const data = event.data as { answer?: string; sources?: SourceInfo[]; steps?: AgentTraceStep[] } | string | null;
       if (typeof data === "string") {
         aiMsg.content = data;
       } else {
@@ -497,6 +529,10 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
         }
         if (data?.sources) {
           aiMsg.sources = data.sources;
+        }
+        // Agent trace from done event（以 done 中的完整 steps 覆盖增量构建的 trace）
+        if (data?.steps) {
+          aiMsg.agentTrace = data.steps;
         }
       }
       aiMsg.streaming = false;
@@ -522,7 +558,8 @@ const streamAnswer = async (payload: AiChatQueryRequest, aiMsg: ChatMessage, isN
   const token = getToken();
   currentAbortController = new AbortController();
 
-  const response = await fetch(`${import.meta.env.VITE_APP_BASE_API}${getAiChatStreamUrl()}`, {
+  const streamUrl = agentMode.value ? getAiChatAgentStreamUrl() : getAiChatStreamUrl();
+  const response = await fetch(`${import.meta.env.VITE_APP_BASE_API}${streamUrl}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -803,6 +840,35 @@ onBeforeUnmount(() => {
               <div v-if="msg.streaming" class="stream-caret"></div>
             </div>
 
+            <!-- Agent 执行轨迹面板（按消息隔离） -->
+            <template v-if="msg.role === 'assistant' && !msg.isError && msg.agentTrace && msg.agentTrace.length > 0">
+              <div class="agent-trace-panel">
+                <button class="trace-toggle" @click="msg.expanded = !msg.expanded">
+                  <span>{{ msg.expanded ? "收起执行轨迹" : "查看执行轨迹" }}</span>
+                  <em>{{ msg.agentTrace.length }} 步</em>
+                </button>
+                <div v-if="msg.expanded" class="trace-list">
+                  <div v-for="(step, idx) in msg.agentTrace" :key="idx" class="trace-item">
+                    <div class="trace-item__step">Step {{ step.step }}</div>
+                    <div class="trace-item__body">
+                      <div class="trace-item__message">{{ step.message }}</div>
+                      <div v-if="step.tool_call" class="trace-item__detail">
+                        <span class="trace-tag trace-tag--call">调用</span>
+                        <code>{{ step.tool_call.tool }}</code>
+                      </div>
+                      <div v-if="step.tool_result" class="trace-item__detail">
+                        <span
+                          class="trace-tag"
+                          :class="step.tool_result.success ? 'trace-tag--success' : 'trace-tag--fail'"
+                        >{{ step.tool_result.success ? "成功" : "失败" }}</span>
+                        <span class="trace-summary">{{ step.tool_result.summary }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <template v-if="msg.role === 'assistant' && !msg.isError && msg.sources && msg.sources.length">
               <div class="source-panel">
                 <button class="source-toggle" @click="toggleSources(msg)">
@@ -831,7 +897,18 @@ onBeforeUnmount(() => {
       <footer class="chat-composer">
         <div class="chat-composer__frame">
           <div class="chat-composer__toolbar">
-            <span class="composer-tag">Stream response</span>
+            <div class="composer-toolbar-left">
+              <span class="composer-tag">Stream response</span>
+              <el-switch
+                v-model="agentMode"
+                size="small"
+                inline-prompt
+                active-text="Agent"
+                inactive-text="标准"
+                :disabled="loading"
+                style="--el-switch-on-color: #bf5a36; margin-left: 10px;"
+              />
+            </div>
             <span class="composer-tip">Enter 发送，Shift + Enter 换行</span>
           </div>
 
@@ -1475,6 +1552,12 @@ onBeforeUnmount(() => {
   padding: 4px 6px 10px;
 }
 
+.composer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .composer-tag {
   display: inline-flex;
   align-items: center;
@@ -1530,6 +1613,112 @@ onBeforeUnmount(() => {
 
 .composer-footnote {
   margin: 10px 4px 0;
+}
+
+/* Agent trace panel */
+.agent-trace-panel {
+  margin-top: 10px;
+  border: 1px solid rgba(81, 58, 42, 0.1);
+  border-radius: 18px;
+  background: rgba(240, 245, 255, 0.78);
+}
+
+.trace-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.trace-toggle em {
+  font-style: normal;
+  font-weight: 700;
+  color: #3b5998;
+}
+
+.trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.trace-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(81, 58, 42, 0.06);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.trace-item__step {
+  font-size: 11px;
+  font-weight: 700;
+  color: #3b5998;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+
+.trace-item__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.trace-item__message {
+  font-size: 13px;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.trace-item__detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.trace-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trace-tag--call {
+  background: rgba(59, 89, 152, 0.12);
+  color: #3b5998;
+}
+
+.trace-tag--success {
+  background: rgba(40, 180, 99, 0.12);
+  color: #1e8449;
+}
+
+.trace-tag--fail {
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+}
+
+.trace-item__detail code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(52, 36, 24, 0.06);
+  font-size: 12px;
+}
+
+.trace-summary {
+  color: var(--text-sub);
+  font-size: 12px;
 }
 
 @keyframes blink-caret {

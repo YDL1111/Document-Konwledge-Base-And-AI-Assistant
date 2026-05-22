@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     EMBEDDING_CONCURRENCY: int = 3        # 并发 embedding 数量
     EMBED_BATCH_SIZE: int = 20            # 每批 embedding 文本数
 
+    # Java Backend (for Agent tools)
+    JAVA_BASE_URL: str = "http://localhost:8080"
+    JAVA_API_KEY: str = ""
+
+    # Agent
+    AGENT_MAX_STEPS: int = 4              # Agent 最大执行步数
+
     # Logging
     LOG_DIR: str = "./logs"
     LOG_RETRIEVAL: bool = True            # 开启检索日志

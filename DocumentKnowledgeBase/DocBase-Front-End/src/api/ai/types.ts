@@ -36,3 +36,18 @@ export interface AiChatMessageDTO {
   sources: SourceInfo[] | null;
   createTime: number | string;
 }
+
+/** Agent 执行轨迹中的单步信息 */
+export interface AgentTraceStep {
+  step: number;
+  message: string;
+  tool_call?: {
+    tool: string;
+    args: Record<string, unknown>;
+  } | null;
+  tool_result?: {
+    tool: string;
+    success: boolean;
+    summary: string;
+  } | null;
+}

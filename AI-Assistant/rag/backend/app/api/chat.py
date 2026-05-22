@@ -11,7 +11,34 @@ from app.core.database import get_db
 from app.models import Conversation, Message, KnowledgeBase
 from app.schemas import ChatRequest, ConversationOut, MessageOut, ResponseModel, PageData
 from app.services.rag import rag_service
+from app.agent.executor import AgentExecutor
+from app.agent.schemas import AgentRequest
+from app.agent.tools import (
+    SearchKBTool,
+    ListIngestTasksTool,
+    GetIngestTaskDetailTool,
+    GetDocumentDetailTool,
+    ListDocumentsByCategoryTool,
+    GetKbMappingInfoTool,
+    ListChatSessionsTool,
+    GetChatHistoryTool,
+)
+from app.core.config import settings
 from loguru import logger
+
+# 初始化 Agent（全局单例，注册全部8个只读工具）
+_agent_executor = AgentExecutor(
+    tools=[
+        SearchKBTool(),
+        ListIngestTasksTool(),
+        GetIngestTaskDetailTool(),
+        GetDocumentDetailTool(),
+        ListDocumentsByCategoryTool(),
+        GetKbMappingInfoTool(),
+        ListChatSessionsTool(),
+        GetChatHistoryTool(),
+    ]
+)
 
 router = APIRouter(prefix="/api/chat", tags=["对话"])
 
@@ -151,6 +178,88 @@ async def stream_message(body: ChatRequest, db: Session = Depends(get_db)):
                     new_db.close()
 
         yield f"data: {json.dumps({'type': 'conv_id', 'data': conv.id})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@router.post("/agent/stream")
+async def agent_stream_message(body: ChatRequest, db: Session = Depends(get_db)):
+    """Agent 模式流式问答（SSE）- 支持工具调用与多步执行"""
+    kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == body.kb_id).first()
+    if not kb:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
+    conv = _get_or_create_conversation(db, body.kb_id, body.conv_id, body.question)
+    history = _get_history(db, conv.id)
+
+    # 保存用户消息
+    user_msg = Message(conv_id=conv.id, role="user", content=body.question)
+    db.add(user_msg)
+    db.commit()
+
+    history = _get_history(db, conv.id)
+
+    async def event_generator():
+        import json
+        full_answer = ""
+        final_sources = []
+        try:
+            agent_request = AgentRequest(
+                kb_id=body.kb_id,
+                question=body.question,
+                conv_id=conv.id,
+                history=history,
+                max_steps=settings.AGENT_MAX_STEPS,
+            )
+            async for chunk in _agent_executor.run_stream(agent_request):
+                yield chunk
+                if '"type": "done"' in chunk or '"type":"done"' in chunk:
+                    try:
+                        data = json.loads(chunk.replace("data: ", "").strip())
+                        answer_data = data.get("data", {})
+                        if isinstance(answer_data, dict):
+                            full_answer = answer_data.get("answer", "")
+                            final_sources = answer_data.get("sources", [])
+                        else:
+                            full_answer = str(answer_data)
+                    except Exception:
+                        pass
+                elif '"type": "sources"' in chunk or '"type":"sources"' in chunk:
+                    try:
+                        data = json.loads(chunk.replace("data: ", "").strip())
+                        final_sources = data.get("data", [])
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"Agent stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            if full_answer:
+                from app.core.database import SessionLocal
+                new_db = SessionLocal()
+                try:
+                    ai_msg = Message(
+                        conv_id=conv.id,
+                        role="assistant",
+                        content=full_answer,
+                        sources=final_sources,
+                    )
+                    new_db.add(ai_msg)
+                    new_db.commit()
+                except Exception as e:
+                    logger.error(f"Save Agent AI message error: {e}")
+                    new_db.rollback()
+                finally:
+                    new_db.close()
+
+        yield f"data: {json.dumps({'type': 'conv_id', 'data': conv.id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),

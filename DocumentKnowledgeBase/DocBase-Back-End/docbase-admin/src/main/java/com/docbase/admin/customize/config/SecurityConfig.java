@@ -97,6 +97,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                // Agent 只读工具接口：供 Python 后端通过 HTTP 调用，无需登录态
+                .requestMatchers("/ai/chat/agent/tools/**").permitAll()
                 .requestMatchers("/login", "/register", "/getConfig", "/captchaImage", "/api/**").anonymous()
                 .requestMatchers(HttpMethod.GET, "/", "/*.html", "/**/*.html", "/**/*.css", "/**/*.js",
                     "/profile/avatar/**", "/profile/document/**").permitAll()

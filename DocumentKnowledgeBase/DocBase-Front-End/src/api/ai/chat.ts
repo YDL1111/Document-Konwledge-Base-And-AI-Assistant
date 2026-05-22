@@ -32,3 +32,6 @@ export const queryAiChatApi = (data: AiChatQueryRequest) => {
 };
 
 export const getAiChatStreamUrl = () => "/ai/chat/stream";
+
+/** Agent 模式流式问答 URL */
+export const getAiChatAgentStreamUrl = () => "/ai/chat/agent/stream";

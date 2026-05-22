@@ -314,6 +314,79 @@ public class PythonAiClient {
         }
     }
 
+    public void streamAgentMessage(PythonChatRequest request, Consumer<String> lineConsumer) {
+        try {
+            String requestBody = objectMapper.writeValueAsString(request);
+            log.info("Calling Python Agent stream API: url={}, body={}", buildUrl("/api/chat/agent/stream"), requestBody);
+
+            URL url = new URL(buildUrl("/api/chat/agent/stream"));
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(properties.getConnectTimeoutMs());
+            connection.setReadTimeout(properties.getReadTimeoutMs());
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
+            connection.setRequestProperty("Accept", MediaType.TEXT_EVENT_STREAM_VALUE);
+
+            if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
+                connection.setRequestProperty("X-API-Key", properties.getApiKey());
+            }
+
+            byte[] bodyBytes = requestBody.getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(bodyBytes.length);
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(bodyBytes);
+                outputStream.flush();
+            }
+
+            int statusCode = connection.getResponseCode();
+            if (statusCode >= 400) {
+                InputStream errorStream = connection.getErrorStream() != null
+                        ? connection.getErrorStream()
+                        : connection.getInputStream();
+                String errorBody = readBody(errorStream);
+                log.error("Python Agent stream API failed: status={}, body={}", statusCode, errorBody);
+                throw new ApiException(
+                        ErrorCode.Internal.INTERNAL_ERROR,
+                        "Python AI Agent stream error: HTTP " + statusCode
+                                + (errorBody == null || errorBody.isBlank() ? "" : ", body=" + errorBody));
+            }
+
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                StringBuilder eventBuilder = new StringBuilder();
+                while ((line = reader.readLine()) != null) {
+                    if (line.isBlank()) {
+                        if (eventBuilder.length() > 0) {
+                            lineConsumer.accept(eventBuilder.toString());
+                            eventBuilder.setLength(0);
+                        }
+                        continue;
+                    }
+
+                    if (eventBuilder.length() > 0) {
+                        eventBuilder.append('\n');
+                    }
+                    eventBuilder.append(line);
+                }
+
+                if (eventBuilder.length() > 0) {
+                    lineConsumer.accept(eventBuilder.toString());
+                }
+            } finally {
+                connection.disconnect();
+            }
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Failed to call Python AI Agent stream API", e);
+            throw new ApiException(
+                    ErrorCode.Internal.INTERNAL_ERROR,
+                    "AI service is temporarily unavailable, please try again later");
+        }
+    }
+
     public void deleteConversation(Integer convId) {
         if (convId == null) {
             return;
