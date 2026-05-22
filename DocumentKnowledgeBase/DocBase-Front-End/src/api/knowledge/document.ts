@@ -37,6 +37,7 @@ export interface KnowledgeDocumentDTO {
   auditRemark?: string;
   creatorId?: number;
   updateTime?: string;
+  hasAiImport?: boolean;
 }
 
 export interface KnowledgeDocumentDetailDTO extends KnowledgeDocumentDTO {

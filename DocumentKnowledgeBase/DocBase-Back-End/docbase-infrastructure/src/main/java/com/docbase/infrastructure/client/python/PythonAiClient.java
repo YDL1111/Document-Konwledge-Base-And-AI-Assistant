@@ -9,6 +9,7 @@ import com.docbase.infrastructure.client.python.dto.PythonDocumentUploadResponse
 import com.docbase.infrastructure.client.python.dto.PythonKbResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -17,15 +18,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 @Slf4j
@@ -37,9 +36,13 @@ public class PythonAiClient {
     private final ObjectMapper objectMapper;
 
     private RestClient restClient() {
+        return restClient(properties.getReadTimeoutMs());
+    }
+
+    private RestClient restClient(int readTimeoutMs) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()));
-        factory.setReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         return RestClient.builder()
                 .baseUrl(properties.getBaseUrl())
                 .requestFactory(factory)
@@ -179,24 +182,63 @@ public class PythonAiClient {
         }
     }
 
-    public PythonDocumentUploadResponse uploadDocument(Integer kbId, byte[] fileBytes, String filename) {
-        try {
-            RestClient client = restClient();
-            MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
-            parts.add("kb_id", String.valueOf(kbId));
-            parts.add("files", new ByteArrayResource(fileBytes) {
-                @Override
-                public String getFilename() {
-                    return filename;
-                }
-            });
+    public PythonDocumentUploadResponse uploadDocument(Integer kbId, byte[] fileBytes,
+                                                       String filename) {
+        return uploadDocument(kbId, fileBytes, filename, null);
+    }
 
-            PythonDocumentUploadResponse response = client.post()
-                    .uri("/api/doc/upload")
-                    .contentType(MediaType.MULTIPART_FORM_DATA)
-                    .body(parts)
-                    .retrieve()
-                    .body(PythonDocumentUploadResponse.class);
+    public PythonDocumentUploadResponse uploadDocument(Integer kbId, byte[] fileBytes,
+                                                       String filename, String sourceRef) {
+        try {
+            String boundary = "----FormBoundary" + UUID.randomUUID().toString().replace("-", "");
+            URL url = new URL(buildUrl("/api/doc/upload"));
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(properties.getConnectTimeoutMs());
+            connection.setReadTimeout(properties.getReadTimeoutMs());
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
+                connection.setRequestProperty("X-API-Key", properties.getApiKey());
+            }
+
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+
+            writeFormField(body, boundary, "kb_id", String.valueOf(kbId));
+
+            if (sourceRef != null && !sourceRef.isBlank()) {
+                writeFormField(body, boundary, "source_ref", sourceRef);
+            }
+
+            body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+            body.write(("Content-Disposition: form-data; name=\"files\"; filename=\""
+                    + filename + "\"\r\n").getBytes(StandardCharsets.UTF_8));
+            body.write(("Content-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+            body.write(fileBytes);
+            body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+
+            byte[] bodyBytes = body.toByteArray();
+            connection.setFixedLengthStreamingMode(bodyBytes.length);
+            try (OutputStream os = connection.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
+            }
+
+            int statusCode = connection.getResponseCode();
+            if (statusCode >= 400) {
+                InputStream errorStream = connection.getErrorStream() != null
+                        ? connection.getErrorStream() : connection.getInputStream();
+                String errorBody = readBody(errorStream);
+                log.error("Python document upload failed: status={}, body={}", statusCode, errorBody);
+                throw new ApiException(ErrorCode.Internal.INTERNAL_ERROR,
+                        "Python document upload failed: HTTP " + statusCode + ", " + errorBody);
+            }
+
+            String responseBody = readBody(connection.getInputStream());
+            connection.disconnect();
+
+            PythonDocumentUploadResponse response =
+                    objectMapper.readValue(responseBody, PythonDocumentUploadResponse.class);
 
             if (response == null) {
                 throw new ApiException(ErrorCode.Internal.INTERNAL_ERROR,
@@ -216,9 +258,18 @@ public class PythonAiClient {
         }
     }
 
+    private void writeFormField(ByteArrayOutputStream body, String boundary,
+                                String name, String value) throws IOException {
+        body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        body.write(("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n")
+                .getBytes(StandardCharsets.UTF_8));
+        body.write(value.getBytes(StandardCharsets.UTF_8));
+        body.write("\r\n".getBytes(StandardCharsets.UTF_8));
+    }
+
     public PythonDocumentResponse getDocumentStatus(Integer docId) {
         try {
-            RestClient client = restClient();
+            RestClient client = restClient(5000);
             PythonDocumentResponse response = client.get()
                     .uri("/api/doc/{docId}", docId)
                     .headers(headers -> {

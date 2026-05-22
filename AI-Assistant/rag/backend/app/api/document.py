@@ -9,12 +9,20 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.config import settings
 from app.models import Document, KnowledgeBase, DocStatus
 from app.schemas import DocOut, LocalPathImport, ResponseModel, PageData
 from app.services.document import doc_service
 from loguru import logger
+
+
+async def process_document_in_background(doc_id: int):
+    db = SessionLocal()
+    try:
+        await doc_service.process_document(db, doc_id)
+    finally:
+        db.close()
 
 router = APIRouter(prefix="/api/doc", tags=["文档"])
 
@@ -47,9 +55,10 @@ async def upload_files(
     background_tasks: BackgroundTasks,
     kb_id: int = Form(...),
     files: List[UploadFile] = File(...),
+    source_ref: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    """上传文件到指定知识库"""
+    """上传文件到指定知识库，可选 source_ref 用于追踪来源"""
     kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
@@ -75,6 +84,9 @@ async def upload_files(
         # 创建文档记录
         file_type = doc_service.parser.get_file_type(f.filename) if hasattr(doc_service, 'parser') else "unknown"
         from app.services.parser import parser as p
+        meta = {}
+        if source_ref:
+            meta["source_ref"] = source_ref
         doc = Document(
             kb_id=kb_id,
             filename=f.filename,
@@ -83,6 +95,7 @@ async def upload_files(
             file_size=len(content),
             source_type="upload",
             status=DocStatus.PENDING,
+            meta_info=meta if meta else None,
         )
         db.add(doc)
         db.flush()
@@ -92,7 +105,7 @@ async def upload_files(
 
     # 后台异步处理
     for doc_id in doc_ids:
-        background_tasks.add_task(doc_service.process_document, db, doc_id)
+        background_tasks.add_task(process_document_in_background, doc_id)
 
     return ResponseModel(
         message=f"成功上传 {len(doc_ids)} 个文件，正在后台处理中",
@@ -151,5 +164,5 @@ async def reprocess_doc(
     doc.status = DocStatus.PENDING
     doc.error_msg = None
     db.commit()
-    background_tasks.add_task(doc_service.process_document, db, doc_id)
+    background_tasks.add_task(process_document_in_background, doc_id)
     return ResponseModel(message="已重新提交处理")

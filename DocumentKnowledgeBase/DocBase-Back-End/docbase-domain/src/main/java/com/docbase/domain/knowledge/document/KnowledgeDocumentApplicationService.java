@@ -25,6 +25,9 @@ import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDTO;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDetailDTO;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentVersionDTO;
 import com.docbase.domain.knowledge.document.query.KnowledgeDocumentQuery;
+import com.docbase.domain.knowledge.ingest.KnowledgeIngestTaskApplicationService;
+import com.docbase.domain.knowledge.ingest.db.KnowledgeIngestTaskEntity;
+import com.docbase.domain.knowledge.ingest.db.KnowledgeIngestTaskService;
 import com.docbase.domain.system.dept.db.SysDeptEntity;
 import com.docbase.domain.system.dept.db.SysDeptService;
 import com.docbase.domain.system.notice.NoticeApplicationService;
@@ -40,6 +43,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -60,6 +64,9 @@ public class KnowledgeDocumentApplicationService {
     private final SysUserService sysUserService;
     private final SysDeptService sysDeptService;
     private final NoticeApplicationService noticeApplicationService;
+    @Lazy
+    private final KnowledgeIngestTaskApplicationService knowledgeIngestTaskApplicationService;
+    private final KnowledgeIngestTaskService knowledgeIngestTaskService;
 
     public PageDTO<KnowledgeDocumentDTO> getDocumentList(KnowledgeDocumentQuery query) {
         Page<KnowledgeDocumentEntity> page =
@@ -67,6 +74,26 @@ public class KnowledgeDocumentApplicationService {
         List<KnowledgeDocumentDTO> records = page.getRecords().stream()
             .map(KnowledgeDocumentDTO::new)
             .collect(Collectors.toList());
+
+        // 检查每个文档的当前版本是否已成功导入AI知识库
+        if (!records.isEmpty()) {
+            List<Long> documentIds = records.stream()
+                    .map(KnowledgeDocumentDTO::getDocumentId).collect(Collectors.toList());
+            java.util.Map<Long, Long> docVersionMap = knowledgeDocumentService.listByIds(documentIds).stream()
+                    .collect(Collectors.toMap(
+                            KnowledgeDocumentEntity::getDocumentId,
+                            doc -> doc.getCurrentVersionId() != null ? doc.getCurrentVersionId() : 0L));
+            java.util.Set<Long> importedPairs = knowledgeIngestTaskService.lambdaQuery()
+                    .eq(KnowledgeIngestTaskEntity::getStatus, KnowledgeIngestTaskApplicationService.STATUS_SUCCESS)
+                    .in(KnowledgeIngestTaskEntity::getDocumentId, documentIds)
+                    .list().stream()
+                    .filter(t -> t.getVersionId() != null
+                            && t.getVersionId().equals(docVersionMap.get(t.getDocumentId())))
+                    .map(KnowledgeIngestTaskEntity::getDocumentId)
+                    .collect(Collectors.toSet());
+            records.forEach(dto -> dto.setHasAiImport(importedPairs.contains(dto.getDocumentId())));
+        }
+
         return new PageDTO<>(records, page.getTotal());
     }
 
@@ -279,6 +306,16 @@ public class KnowledgeDocumentApplicationService {
 
         // 审核完成后通知文档创建人
         publishAuditNotice(entity, approved);
+
+        // 审核通过后自动创建导入任务，同步到Python RAG
+        if (approved) {
+            try {
+                knowledgeIngestTaskApplicationService.submitImportTask(documentId);
+                log.info("Auto-created import task for approved document: documentId={}", documentId);
+            } catch (Exception e) {
+                log.warn("审核通过后创建导入任务失败，主流程不受影响。documentId={}", documentId, e);
+            }
+        }
     }
 
     private void publishAuditNotice(KnowledgeDocumentEntity entity, boolean approved) {

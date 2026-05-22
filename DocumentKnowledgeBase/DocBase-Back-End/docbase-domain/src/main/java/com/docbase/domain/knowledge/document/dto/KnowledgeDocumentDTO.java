@@ -20,6 +20,7 @@ public class KnowledgeDocumentDTO {
     private String auditRemark;
     private Long creatorId;
     private Date updateTime;
+    private Boolean hasAiImport;
 
     public KnowledgeDocumentDTO(KnowledgeDocumentEntity entity) {
         if (entity != null) {

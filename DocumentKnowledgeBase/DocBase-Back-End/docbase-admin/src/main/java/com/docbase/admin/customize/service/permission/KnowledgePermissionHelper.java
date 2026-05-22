@@ -153,8 +153,8 @@ public class KnowledgePermissionHelper {
             query.setCreatorId(currentUser().getUserId());
             return;
         }
-        // 入库任务目前只有 creatorId 过滤能力，部门级暂不做
-        query.setDeptIdList(accessibleDeptIds());
+        // 入库任务表没有 dept_id，无法做部门过滤，退化为 ONLY_SELF
+        query.setCreatorId(currentUser().getUserId());
     }
 
     // ──────────────── 实体访问权判断 ────────────────

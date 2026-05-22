@@ -30,6 +30,7 @@ import {
   getKnowledgeCategoryListApi,
   type KnowledgeCategoryDTO
 } from "@/api/knowledge/category";
+import { submitImportTaskApi } from "@/api/knowledge/ingest";
 
 defineOptions({
   name: "KnowledgeDocument"
@@ -332,6 +333,21 @@ async function previewCurrentDocument() {
   }
 }
 
+const importingDocId = ref<number>();
+
+async function handleImportToAI(row: KnowledgeDocumentDTO) {
+  importingDocId.value = row.documentId;
+  try {
+    await submitImportTaskApi(row.documentId);
+    message(`文档「${row.title}」导入任务已创建`, { type: "success" });
+  } catch (error) {
+    console.error(error);
+    message("创建导入任务失败", { type: "error" });
+  } finally {
+    importingDocId.value = undefined;
+  }
+}
+
 function downloadCurrentDocument() {
   if (!detailData.value?.documentId) {
     message("当前文档信息不完整", { type: "warning" });
@@ -492,6 +508,15 @@ onMounted(() => {
               @click="openAuditDialog(row)"
             >
               审核
+            </el-button>
+            <el-button
+              v-if="row.status === 3 && !row.hasAiImport"
+              link
+              type="warning"
+              :loading="importingDocId === row.documentId"
+              @click="handleImportToAI(row)"
+            >
+              导入知识库
             </el-button>
           </template>
         </el-table-column>
