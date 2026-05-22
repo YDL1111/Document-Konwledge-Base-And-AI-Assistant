@@ -248,18 +248,26 @@ D:\ResumeProjects
 当前 Java 开发库名：
 - `docbase_knowledge`
 
-配置参考：
-- [application-dev.yml](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/docbase-admin/src/main/resources/application-dev.yml)
+公开仓库默认使用的快速启动 SQL：
+- [docbase_knowledge_public_bootstrap.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/docbase_knowledge_public_bootstrap.sql)
 
-如果你已经接入“导入任务 -> Python RAG 同步”能力，需要执行迁移脚本：
+这份公开版脚本包含：
 
-- [migration-add-ingest-python-fields.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql)
+- 当前 Java 项目运行所需的核心表结构
+- AI 问答与导入任务所需关键字段
+- 最小演示数据
+- 不包含你的私有聊天记录、私有知识库文件或本地业务数据
 
-执行命令：
+推荐初始化方式：
 
 ```bash
-mysql -u root -p123456 -D docbase_knowledge -e "source D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql"
+cd D:\ResumeProjects\DocumentKnowledgeBase\DocBase-Back-End\sql
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS docbase_knowledge DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_general_ci;"
+mysql -u root -p docbase_knowledge < docbase_knowledge_public_bootstrap.sql
 ```
+
+如果你要查看 SQL 目录说明，可参考：
+- [sql/README.md](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/README.md)
 
 ---
 
