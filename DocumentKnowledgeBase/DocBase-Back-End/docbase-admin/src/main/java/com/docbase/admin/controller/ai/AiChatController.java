@@ -13,6 +13,7 @@ import com.docbase.infrastructure.user.AuthenticationUtils;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -69,9 +70,10 @@ public class AiChatController extends BaseController {
     @Operation(summary = "Stream AI chat response")
     @PreAuthorize("@permission.has('ai:chat:query')")
     @PostMapping("/stream")
-    public SseEmitter stream(@RequestBody AiChatQueryRequest request) {
+    public SseEmitter stream(@RequestBody AiChatQueryRequest request,
+                             HttpServletResponse response) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
-        return aiChatApplicationService.streamQuery(request, loginUser);
+        return aiChatApplicationService.streamQuery(request, loginUser, response);
     }
 
     private void restrictToCurrentUserIfNeeded(AiChatSessionQuery query) {

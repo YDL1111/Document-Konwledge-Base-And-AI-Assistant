@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -129,7 +130,8 @@ public class AiChatApplicationService {
         }
     }
 
-    public SseEmitter streamQuery(AiChatQueryRequest request, SystemLoginUser loginUser) {
+    public SseEmitter streamQuery(AiChatQueryRequest request, SystemLoginUser loginUser,
+                                   HttpServletResponse response) {
         Integer kbId = resolveKbId(request);
         AiChatSessionEntity session = findOrCreateSession(request, loginUser);
         Integer pythonConvId = session.getPythonConvId();
@@ -143,7 +145,7 @@ public class AiChatApplicationService {
                 .stream(true)
                 .build();
 
-        SseEmitter emitter = new SseEmitter();
+        SseEmitter emitter = new SseEmitter(-1L);
 
         Thread streamThread = new Thread(() -> {
             UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
@@ -155,10 +157,11 @@ public class AiChatApplicationService {
             List<AiChatAnswerDTO.SourceInfo> finalSources = new ArrayList<>();
 
             try {
-                sendEvent(emitter, "conv_id", session.getSessionId());
+                sendEvent(emitter, "conv_id", session.getSessionId(), response);
                 pythonAiClient.streamMessage(pythonRequest, line -> {
                     try {
-                        handlePythonStreamLine(line, session, emitter, answerBuilder, finalSources);
+                        handlePythonStreamLine(line, session, emitter, answerBuilder,
+                                finalSources, response);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -166,13 +169,15 @@ public class AiChatApplicationService {
 
                 updateSessionAfterQuery(session, request.getQuestion());
                 saveAssistantStreamMessage(session, kbId, answerBuilder.toString(), finalSources);
-                sendEvent(emitter, "done", Map.of("answer", answerBuilder.toString(), "sources", finalSources));
+                sendEvent(emitter, "done",
+                        Map.of("answer", answerBuilder.toString(), "sources", finalSources), response);
                 emitter.complete();
             } catch (Exception e) {
                 log.error("AI stream query failed: sessionId={}", session.getSessionId(), e);
                 saveAssistantErrorMessage(session, kbId, e);
                 try {
-                    sendEvent(emitter, "error", e.getMessage() != null ? e.getMessage() : DEFAULT_STREAM_ERROR_MESSAGE);
+                    sendEvent(emitter, "error",
+                            e.getMessage() != null ? e.getMessage() : DEFAULT_STREAM_ERROR_MESSAGE, response);
                 } catch (IOException ignored) {
                     log.warn("Failed to send stream error event");
                 }
@@ -366,7 +371,8 @@ public class AiChatApplicationService {
             AiChatSessionEntity session,
             SseEmitter emitter,
             StringBuilder answerBuilder,
-            List<AiChatAnswerDTO.SourceInfo> finalSources) throws IOException {
+            List<AiChatAnswerDTO.SourceInfo> finalSources,
+            HttpServletResponse response) throws IOException {
         if (line == null || line.isBlank()) {
             return;
         }
@@ -385,7 +391,7 @@ public class AiChatApplicationService {
             case "token" -> {
                 String token = event.getData() != null ? String.valueOf(event.getData()) : "";
                 answerBuilder.append(token);
-                sendEvent(emitter, "token", token);
+                sendEvent(emitter, "token", token, response);
             }
             case "sources" -> {
                 List<AiChatAnswerDTO.SourceInfo> sources = objectMapper.convertValue(
@@ -393,21 +399,21 @@ public class AiChatApplicationService {
                         new TypeReference<List<AiChatAnswerDTO.SourceInfo>>() {});
                 finalSources.clear();
                 finalSources.addAll(sources);
-                sendEvent(emitter, "sources", sources);
+                sendEvent(emitter, "sources", sources, response);
             }
             case "conv_id" -> {
                 Integer convId = objectMapper.convertValue(event.getData(), Integer.class);
                 if (convId != null) {
                     session.setPythonConvId(convId);
                     aiChatSessionService.updateById(session);
-                    sendEvent(emitter, "python_conv_id", convId);
+                    sendEvent(emitter, "python_conv_id", convId, response);
                 }
             }
             case "error" -> {
                 String error = event.getData() != null
                         ? String.valueOf(event.getData())
                         : DEFAULT_STREAM_ERROR_MESSAGE;
-                sendEvent(emitter, "error", error);
+                sendEvent(emitter, "error", error, response);
                 throw new IOException(error);
             }
             default -> {
@@ -439,12 +445,18 @@ public class AiChatApplicationService {
         return builder.isEmpty() ? null : builder.toString();
     }
 
-    private void sendEvent(SseEmitter emitter, String type, Object data) throws IOException {
+    private void sendEvent(SseEmitter emitter, String type, Object data,
+                           HttpServletResponse response) throws IOException {
         String json = objectMapper.writeValueAsString(AiChatStreamEventDTO.builder()
                 .type(type)
                 .data(data)
                 .build());
-        emitter.send(("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8));
+        emitter.send(SseEmitter.event().data(json));
+        try {
+            response.flushBuffer();
+        } catch (IllegalStateException ignored) {
+            // response already committed
+        }
     }
 
     private AiChatMessageDTO toMessageDTO(AiChatMessageEntity entity) {

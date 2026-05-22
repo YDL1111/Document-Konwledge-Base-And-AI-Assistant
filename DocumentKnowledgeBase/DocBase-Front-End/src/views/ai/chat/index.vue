@@ -198,6 +198,10 @@ const renderMarkdown = (content: string) => {
   return result;
 };
 
+// 流式消息 DOM 元素引用，用于直接写入绕过 Vue 批处理
+const streamingContentEl = ref<HTMLElement | null>(null);
+let lastStreamScrollTime = 0;
+
 const scrollToBottom = async (smooth = false) => {
   await nextTick();
   if (!messagesContainer.value) return;
@@ -461,7 +465,24 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
       break;
     case "token":
       aiMsg.content += String(event.data ?? "");
-      await scrollToBottom();
+      const el = streamingContentEl.value
+        ?? document.getElementById(`stream-${aiMsg.id}`);
+      if (el) {
+        el.textContent = aiMsg.content;
+        if (!streamingContentEl.value) {
+          streamingContentEl.value = el as HTMLElement;
+        }
+        const now = performance.now();
+        if (now - lastStreamScrollTime > 32) {
+          lastStreamScrollTime = now;
+          messagesContainer.value?.scrollTo({
+            top: messagesContainer.value.scrollHeight,
+            behavior: "auto"
+          });
+        }
+      }
+      // 让出控制权到 macrotask 队列，浏览器此时执行 paint
+      await new Promise(resolve => setTimeout(resolve, 0));
       break;
     case "sources":
       aiMsg.sources = (event.data as SourceInfo[]) ?? [];
@@ -479,6 +500,7 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
         }
       }
       aiMsg.streaming = false;
+      streamingContentEl.value = null;
       await scrollToBottom();
       break;
     }
@@ -486,6 +508,7 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
       const message = String(event.data ?? "AI 服务暂时不可用，请稍后重试");
       aiMsg.isError = true;
       aiMsg.streaming = false;
+      streamingContentEl.value = null;
       aiMsg.content = message;
       await scrollToBottom();
       throw new Error(message);
@@ -595,6 +618,7 @@ const send = async () => {
 
     aiMsg.isError = true;
     aiMsg.streaming = false;
+    streamingContentEl.value = null;
     if (!aiMsg.content) {
       aiMsg.content = error instanceof Error ? error.message : "AI 服务暂时不可用，请稍后重试";
     }
@@ -761,10 +785,16 @@ onBeforeUnmount(() => {
               </div>
 
               <div
-                v-else-if="msg.role === 'assistant'"
+                v-else-if="msg.role === 'assistant' && !msg.streaming"
                 class="message-markdown"
                 v-html="renderMarkdown(msg.content)"
               ></div>
+              <div
+                v-else-if="msg.role === 'assistant' && msg.streaming"
+                :ref="(el: unknown) => { streamingContentEl = el as HTMLElement | null }"
+                :id="`stream-${msg.id}`"
+                class="message-content streaming-text"
+              >{{ msg.content }}</div>
 
               <div v-else class="message-content">
                 {{ msg.content }}
@@ -1245,6 +1275,10 @@ onBeforeUnmount(() => {
   line-height: 1.85;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.streaming-text {
+  padding: 2px 0;
 }
 
 .message-markdown {
