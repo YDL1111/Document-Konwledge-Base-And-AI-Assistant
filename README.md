@@ -248,26 +248,18 @@ D:\ResumeProjects
 当前 Java 开发库名：
 - `docbase_knowledge`
 
-公开仓库默认使用的快速启动 SQL：
-- [docbase_knowledge_public_bootstrap.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/docbase_knowledge_public_bootstrap.sql)
+配置参考：
+- [application-dev.yml](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/docbase-admin/src/main/resources/application-dev.yml)
 
-这份公开版脚本包含：
+如果你已经接入“导入任务 -> Python RAG 同步”能力，需要执行迁移脚本：
 
-- 当前 Java 项目运行所需的核心表结构
-- AI 问答与导入任务所需关键字段
-- 最小演示数据
-- 不包含你的私有聊天记录、私有知识库文件或本地业务数据
+- [migration-add-ingest-python-fields.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql)
 
-推荐初始化方式：
+执行命令：
 
 ```bash
-cd D:\ResumeProjects\DocumentKnowledgeBase\DocBase-Back-End\sql
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS docbase_knowledge DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_general_ci;"
-mysql -u root -p docbase_knowledge < docbase_knowledge_public_bootstrap.sql
+mysql -u root -p123456 -D docbase_knowledge -e "source D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql"
 ```
-
-如果你要查看 SQL 目录说明，可参考：
-- [sql/README.md](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/README.md)
 
 ---
 
@@ -416,34 +408,9 @@ uvicorn main:app --reload --port 8000
 
 - `VITE_APP_BASE_API`
 
----
-
-## 建议重点阅读的子项目文档
-
-- [DocBase-Back-End/README.md](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/README.md)
-- [DocBase-Front-End/README.md](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Front-End/README.md)
-- [AI-Assistant/rag/README.md](D:/ResumeProjects/AI-Assistant/rag/README.md)
-
----
-
 ## docs 目录补充文档
 
 当前比较重要的补充文档有：
 
-- [Codex会话交接-当前进度.md](D:/ResumeProjects/docs/Codex会话交接-当前进度.md)
 - [知识库管理-导入任务-Python-RAG-落地设计稿.md](D:/ResumeProjects/docs/知识库管理-导入任务-Python-RAG-落地设计稿.md)
 - [轻量agent升级计划.md](D:/ResumeProjects/docs/轻量agent升级计划.md)
-
----
-
-## 当前项目的定位建议
-
-如果你要向别人介绍这个工作区，更准确的说法不是：
-
-- “这是一个 AI 问答助手项目”
-
-而是：
-
-- “这是一个企业知识库管理系统工作区，Java 负责业务主系统，Vue 负责管理端与问答交互，Python 负责 RAG 和轻量 Agent 能力。”
-
-这样更符合当前项目实际，也更适合写进简历、README 或面试说明里。
