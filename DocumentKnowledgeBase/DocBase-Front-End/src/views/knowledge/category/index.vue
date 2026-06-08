@@ -13,6 +13,7 @@ import {
 } from "@/api/knowledge/category";
 import { message } from "@/utils/message";
 import { handleTree } from "@/utils/tree";
+import { hasAuth } from "@/router/utils";
 
 defineOptions({
   name: "KnowledgeCategory"
@@ -31,6 +32,9 @@ const dialogMode = ref<"add" | "edit">("add");
 const categoryList = ref<KnowledgeCategoryDTO[]>([]);
 const formRef = ref<FormInstance>();
 const editingId = ref<number>();
+const canAdd = computed(() => hasAuth("knowledge:category:add"));
+const canEdit = computed(() => hasAuth("knowledge:category:edit"));
+const canRemove = computed(() => hasAuth("knowledge:category:remove"));
 
 const searchForm = reactive<KnowledgeCategoryQuery>({
   categoryName: "",
@@ -258,7 +262,7 @@ onMounted(() => {
               已改成树形管理视图。每个父级下的子分类按“同级排序”展示，分类多了也能更清晰地看层级。
             </p>
           </div>
-          <el-button type="primary" @click="openAddDialog()">新增顶级分类</el-button>
+          <el-button v-if="canAdd" type="primary" @click="openAddDialog()">新增顶级分类</el-button>
         </div>
       </template>
 
@@ -334,9 +338,9 @@ onMounted(() => {
         <el-table-column prop="categoryId" label="分类ID" width="100" />
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openAddDialog(row)">加子分类</el-button>
-            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
-            <el-popconfirm title="确认删除该分类吗？" @confirm="handleDelete(row)">
+            <el-button v-if="canAdd" link type="primary" @click="openAddDialog(row)">加子分类</el-button>
+            <el-button v-if="canEdit" link type="primary" @click="openEditDialog(row)">编辑</el-button>
+            <el-popconfirm v-if="canRemove" title="确认删除该分类吗？" @confirm="handleDelete(row)">
               <template #reference>
                 <el-button link type="danger">删除</el-button>
               </template>

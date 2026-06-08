@@ -98,7 +98,7 @@ public class KnowledgeIngestTaskApplicationService {
         task.setTaskNo(generateTaskNo());
         task.setDocumentId(documentId);
         task.setVersionId(currentVersion.getVersionId());
-        task.setTaskType(TASK_TYPE_IMPORT);
+        task.setTaskType(hasSuccessfulPythonDoc(documentId) ? TASK_TYPE_REIMPORT : TASK_TYPE_IMPORT);
         task.setStatus(STATUS_PENDING);
         task.setRetryCount(0);
         task.setPythonKbId(kbId);
@@ -122,7 +122,9 @@ public class KnowledgeIngestTaskApplicationService {
         task.setStatus(STATUS_PENDING);
         task.setRetryCount((task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1);
         task.setErrorMessage(null);
-        task.setTaskType(TASK_TYPE_RETRY);
+        if (!Objects.equals(task.getTaskType(), TASK_TYPE_DELETE)) {
+            task.setTaskType(TASK_TYPE_RETRY);
+        }
         knowledgeIngestTaskService.updateById(task);
 
         log.info("Import task reset for retry: taskId={}, retryCount={}", taskId, task.getRetryCount());
@@ -161,6 +163,13 @@ public class KnowledgeIngestTaskApplicationService {
     }
 
     private KnowledgeIngestTaskDTO doProcessTask(KnowledgeIngestTaskEntity task) {
+        if (Objects.equals(task.getTaskType(), TASK_TYPE_DELETE)) {
+            return doProcessDeleteTask(task);
+        }
+        return doProcessUploadTask(task);
+    }
+
+    private KnowledgeIngestTaskDTO doProcessUploadTask(KnowledgeIngestTaskEntity task) {
         task.setStatus(STATUS_PROCESSING);
         task.setStartedTime(new Date());
         knowledgeIngestTaskService.updateById(task);
@@ -247,6 +256,7 @@ public class KnowledgeIngestTaskApplicationService {
                     task.setChunkCount(response.getData().getChunkCount());
                     task.setFinishedTime(new Date());
                     knowledgeIngestTaskService.updateById(task);
+                    deleteStalePythonDocs(task);
                 } else if ("failed".equalsIgnoreCase(pyStatus)) {
                     task.setStatus(STATUS_FAILED);
                     task.setErrorMessage(response.getData().getErrorMsg());
@@ -259,6 +269,96 @@ public class KnowledgeIngestTaskApplicationService {
                     taskId, task.getPythonDocId(), e);
         }
         return new KnowledgeIngestTaskDTO(task);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public List<KnowledgeIngestTaskDTO> syncDeleteDocument(Long documentId) {
+        List<KnowledgeIngestTaskEntity> successfulTasks = listSuccessfulPythonTasks(documentId);
+        List<KnowledgeIngestTaskDTO> result = new java.util.ArrayList<>();
+        for (KnowledgeIngestTaskEntity successfulTask : successfulTasks) {
+            KnowledgeIngestTaskEntity deleteTask = new KnowledgeIngestTaskEntity();
+            deleteTask.setTaskNo(generateTaskNo());
+            deleteTask.setDocumentId(successfulTask.getDocumentId());
+            deleteTask.setVersionId(successfulTask.getVersionId());
+            deleteTask.setTaskType(TASK_TYPE_DELETE);
+            deleteTask.setStatus(STATUS_PENDING);
+            deleteTask.setRetryCount(0);
+            deleteTask.setPythonKbId(successfulTask.getPythonKbId());
+            deleteTask.setPythonDocId(successfulTask.getPythonDocId());
+            knowledgeIngestTaskService.save(deleteTask);
+            result.add(doProcessDeleteTask(deleteTask));
+        }
+        return result;
+    }
+
+    private KnowledgeIngestTaskDTO doProcessDeleteTask(KnowledgeIngestTaskEntity task) {
+        task.setStatus(STATUS_PROCESSING);
+        task.setStartedTime(new Date());
+        knowledgeIngestTaskService.updateById(task);
+
+        try {
+            pythonAiClient.deleteDocument(task.getPythonDocId());
+            task.setStatus(STATUS_SUCCESS);
+            task.setFinishedTime(new Date());
+            task.setErrorMessage(null);
+            knowledgeIngestTaskService.updateById(task);
+            log.info("Python document deleted: taskId={}, documentId={}, pythonDocId={}",
+                    task.getTaskId(), task.getDocumentId(), task.getPythonDocId());
+        } catch (Exception e) {
+            task.setStatus(STATUS_FAILED);
+            String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (errMsg.length() > 500) {
+                errMsg = errMsg.substring(0, 500);
+            }
+            task.setErrorMessage(errMsg);
+            task.setFinishedTime(new Date());
+            knowledgeIngestTaskService.updateById(task);
+            log.error("Python document delete task failed: taskId={}, pythonDocId={}",
+                    task.getTaskId(), task.getPythonDocId(), e);
+        }
+
+        return new KnowledgeIngestTaskDTO(task);
+    }
+
+    private void deleteStalePythonDocs(KnowledgeIngestTaskEntity currentTask) {
+        if (currentTask.getDocumentId() == null || currentTask.getPythonDocId() == null) {
+            return;
+        }
+        List<KnowledgeIngestTaskEntity> staleTasks = listSuccessfulPythonTasks(currentTask.getDocumentId()).stream()
+                .filter(task -> !Objects.equals(task.getTaskId(), currentTask.getTaskId()))
+                .filter(task -> !Objects.equals(task.getPythonDocId(), currentTask.getPythonDocId()))
+                .collect(Collectors.toList());
+
+        for (KnowledgeIngestTaskEntity staleTask : staleTasks) {
+            try {
+                pythonAiClient.deleteDocument(staleTask.getPythonDocId());
+                log.info("Deleted stale Python document after reimport: currentTaskId={}, stalePythonDocId={}",
+                        currentTask.getTaskId(), staleTask.getPythonDocId());
+            } catch (Exception e) {
+                log.warn("Failed to delete stale Python document after reimport: currentTaskId={}, stalePythonDocId={}",
+                        currentTask.getTaskId(), staleTask.getPythonDocId(), e);
+            }
+        }
+    }
+
+    private boolean hasSuccessfulPythonDoc(Long documentId) {
+        return knowledgeIngestTaskService.count(
+                new LambdaQueryWrapper<KnowledgeIngestTaskEntity>()
+                        .eq(KnowledgeIngestTaskEntity::getDocumentId, documentId)
+                        .eq(KnowledgeIngestTaskEntity::getStatus, STATUS_SUCCESS)
+                        .ne(KnowledgeIngestTaskEntity::getTaskType, TASK_TYPE_DELETE)
+                        .isNotNull(KnowledgeIngestTaskEntity::getPythonDocId)) > 0;
+    }
+
+    private List<KnowledgeIngestTaskEntity> listSuccessfulPythonTasks(Long documentId) {
+        return knowledgeIngestTaskService.list(
+                new LambdaQueryWrapper<KnowledgeIngestTaskEntity>()
+                        .eq(KnowledgeIngestTaskEntity::getDocumentId, documentId)
+                        .eq(KnowledgeIngestTaskEntity::getStatus, STATUS_SUCCESS)
+                        .ne(KnowledgeIngestTaskEntity::getTaskType, TASK_TYPE_DELETE)
+                        .isNotNull(KnowledgeIngestTaskEntity::getPythonDocId)
+                        .orderByDesc(KnowledgeIngestTaskEntity::getFinishedTime)
+                        .orderByDesc(KnowledgeIngestTaskEntity::getTaskId));
     }
 
     private Integer resolveKbId(KnowledgeDocumentEntity document) {

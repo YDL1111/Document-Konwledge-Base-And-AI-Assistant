@@ -12,23 +12,33 @@ import com.docbase.domain.ai.chat.dto.AiChatQueryRequest;
 import com.docbase.domain.ai.chat.dto.AiChatSessionDTO;
 import com.docbase.domain.ai.chat.dto.AiChatStreamEventDTO;
 import com.docbase.domain.ai.chat.query.AiChatSessionQuery;
+import com.docbase.domain.knowledge.document.KnowledgeDocumentConstant;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentEntity;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentService;
+import com.docbase.domain.knowledge.ingest.KnowledgeIngestTaskApplicationService;
+import com.docbase.domain.knowledge.ingest.db.KnowledgeIngestTaskEntity;
+import com.docbase.domain.knowledge.ingest.db.KnowledgeIngestTaskService;
+import com.docbase.domain.system.dept.db.SysDeptService;
 import com.docbase.infrastructure.client.python.KbMappingProperties;
 import com.docbase.infrastructure.client.python.PythonAiClient;
 import com.docbase.infrastructure.client.python.dto.PythonChatRequest;
 import com.docbase.infrastructure.client.python.dto.PythonChatResponse;
+import com.docbase.infrastructure.user.web.DataScopeEnum;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +61,8 @@ public class AiChatApplicationService {
     private final PythonAiClient pythonAiClient;
     private final KbMappingProperties kbMappingProperties;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final KnowledgeIngestTaskService knowledgeIngestTaskService;
+    private final SysDeptService sysDeptService;
     private final AiChatMessageService aiChatMessageService;
     private final ObjectMapper objectMapper;
 
@@ -100,6 +112,7 @@ public class AiChatApplicationService {
         Integer kbId = resolveKbId(request);
         AiChatSessionEntity session = findOrCreateSession(request, loginUser);
         Integer pythonConvId = session.getPythonConvId();
+        List<Integer> visibleDocIds = resolveVisiblePythonDocIds(request, kbId, loginUser);
 
         saveUserMessage(session, request, kbId, loginUser);
 
@@ -108,10 +121,11 @@ public class AiChatApplicationService {
                 .convId(pythonConvId)
                 .question(request.getQuestion())
                 .stream(false)
+                .visibleDocIds(visibleDocIds)
                 .build();
 
-        log.info("AI query: sessionId={}, kbId={}, pythonConvId={}, question={}",
-                session.getSessionId(), kbId, pythonConvId, request.getQuestion());
+        log.info("AI query: sessionId={}, kbId={}, pythonConvId={}, visibleDocs={}, question={}",
+                session.getSessionId(), kbId, pythonConvId, visibleDocIds.size(), request.getQuestion());
 
         try {
             PythonChatResponse pythonResponse = pythonAiClient.sendMessage(pythonRequest);
@@ -135,6 +149,7 @@ public class AiChatApplicationService {
         Integer kbId = resolveKbId(request);
         AiChatSessionEntity session = findOrCreateSession(request, loginUser);
         Integer pythonConvId = session.getPythonConvId();
+        List<Integer> visibleDocIds = resolveVisiblePythonDocIds(request, kbId, loginUser);
 
         saveUserMessage(session, request, kbId, loginUser);
 
@@ -143,6 +158,7 @@ public class AiChatApplicationService {
                 .convId(pythonConvId)
                 .question(request.getQuestion())
                 .stream(true)
+                .visibleDocIds(visibleDocIds)
                 .build();
 
         SseEmitter emitter = new SseEmitter(-1L);
@@ -189,6 +205,100 @@ public class AiChatApplicationService {
         streamThread.start();
 
         return emitter;
+    }
+
+    private List<Integer> resolveVisiblePythonDocIds(AiChatQueryRequest request, Integer kbId,
+                                                     SystemLoginUser loginUser) {
+        List<KnowledgeDocumentEntity> candidateDocs = loadCandidateDocuments(request, kbId);
+        if (candidateDocs.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> visibleDocumentIds = candidateDocs.stream()
+                .filter(doc -> canCurrentUserView(doc, loginUser))
+                .map(KnowledgeDocumentEntity::getDocumentId)
+                .collect(Collectors.toList());
+        if (visibleDocumentIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return knowledgeIngestTaskService.list(
+                        new LambdaQueryWrapper<KnowledgeIngestTaskEntity>()
+                                .eq(KnowledgeIngestTaskEntity::getStatus,
+                                        KnowledgeIngestTaskApplicationService.STATUS_SUCCESS)
+                                .ne(KnowledgeIngestTaskEntity::getTaskType,
+                                        KnowledgeIngestTaskApplicationService.TASK_TYPE_DELETE)
+                                .eq(KnowledgeIngestTaskEntity::getPythonKbId, kbId)
+                                .isNotNull(KnowledgeIngestTaskEntity::getPythonDocId)
+                                .in(KnowledgeIngestTaskEntity::getDocumentId, visibleDocumentIds)
+                                .orderByDesc(KnowledgeIngestTaskEntity::getFinishedTime)
+                                .orderByDesc(KnowledgeIngestTaskEntity::getTaskId))
+                .stream()
+                .filter(task -> task.getPythonDocId() != null)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
+                                KnowledgeIngestTaskEntity::getDocumentId,
+                                KnowledgeIngestTaskEntity::getPythonDocId,
+                                (first, ignored) -> first),
+                        map -> new ArrayList<>(new HashSet<>(map.values()))));
+    }
+
+    private List<KnowledgeDocumentEntity> loadCandidateDocuments(AiChatQueryRequest request, Integer kbId) {
+        if (request.getDocumentId() != null) {
+            KnowledgeDocumentEntity doc = knowledgeDocumentService.getById(request.getDocumentId());
+            return doc == null ? Collections.emptyList() : List.of(doc);
+        }
+
+        Set<Long> categoryIds = kbMappingProperties.getCategoryMappings().entrySet().stream()
+                .filter(entry -> Objects.equals(entry.getValue(), kbId))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(KnowledgeDocumentEntity::getStatus, KnowledgeDocumentConstant.Status.PUBLISHED);
+        if (request.getCategoryId() != null) {
+            wrapper.eq(KnowledgeDocumentEntity::getCategoryId, request.getCategoryId());
+        } else if (!categoryIds.isEmpty()) {
+            wrapper.in(KnowledgeDocumentEntity::getCategoryId, categoryIds);
+        }
+        return knowledgeDocumentService.list(wrapper);
+    }
+
+    private boolean canCurrentUserView(KnowledgeDocumentEntity doc, SystemLoginUser loginUser) {
+        if (loginUser.isAdmin()) {
+            return true;
+        }
+        if (Objects.equals(doc.getCreatorId(), loginUser.getUserId())) {
+            return true;
+        }
+        if (!Objects.equals(doc.getStatus(), KnowledgeDocumentConstant.Status.PUBLISHED)) {
+            return false;
+        }
+        if (Objects.equals(doc.getVisibility(), KnowledgeDocumentConstant.Visibility.PUBLIC)) {
+            return true;
+        }
+        if (Objects.equals(doc.getVisibility(), KnowledgeDocumentConstant.Visibility.DEPT)) {
+            return canAccessDocumentDept(doc.getDeptId(), loginUser);
+        }
+        return false;
+    }
+
+    private boolean canAccessDocumentDept(Long documentDeptId, SystemLoginUser loginUser) {
+        if (documentDeptId == null) {
+            return false;
+        }
+        DataScopeEnum scope = loginUser.getRoleInfo().getDataScope();
+        return switch (scope) {
+            case ALL -> true;
+            case CUSTOM_DEFINE -> {
+                Set<Long> deptIdSet = loginUser.getRoleInfo().getDeptIdSet();
+                yield deptIdSet != null && deptIdSet.contains(documentDeptId);
+            }
+            case SINGLE_DEPT -> Objects.equals(documentDeptId, loginUser.getDeptId());
+            case DEPT_TREE -> Objects.equals(documentDeptId, loginUser.getDeptId())
+                    || sysDeptService.isChildOfTheDept(loginUser.getDeptId(), documentDeptId);
+            case ONLY_SELF -> false;
+        };
     }
 
     private Integer resolveKbId(AiChatQueryRequest request) {
@@ -464,6 +574,7 @@ public class AiChatApplicationService {
         Integer kbId = resolveKbId(request);
         AiChatSessionEntity session = findOrCreateSession(request, loginUser);
         Integer pythonConvId = session.getPythonConvId();
+        List<Integer> visibleDocIds = resolveVisiblePythonDocIds(request, kbId, loginUser);
 
         saveUserMessage(session, request, kbId, loginUser);
 
@@ -472,6 +583,7 @@ public class AiChatApplicationService {
                 .convId(pythonConvId)
                 .question(request.getQuestion())
                 .stream(true)
+                .visibleDocIds(visibleDocIds)
                 .build();
 
         SseEmitter emitter = new SseEmitter(-1L);

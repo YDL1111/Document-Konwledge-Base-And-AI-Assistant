@@ -36,6 +36,7 @@ class SearchKBTool(BaseTool):
         kb_id = kwargs.get("kb_id", 1)
         question = kwargs.get("question", "")
         top_k = kwargs.get("top_k", 5)
+        visible_doc_ids = kwargs.get("visible_doc_ids")
 
         if not question.strip():
             return {
@@ -49,7 +50,11 @@ class SearchKBTool(BaseTool):
             from app.core.config import settings
             # 与标准模式保持一致：用 TOP_K 检索 + RERANK_TOP_K 重排
             results, cache_hit = await rag_service.retrieve(
-                kb_id=kb_id, query=question, k=settings.TOP_K, strategy="hybrid"
+                kb_id=kb_id,
+                query=question,
+                k=settings.TOP_K,
+                strategy="hybrid",
+                visible_doc_ids=visible_doc_ids,
             )
             # 复用标准模式的 context 构建，保证内容完整、格式一致
             context, sources = rag_service._build_context(results)

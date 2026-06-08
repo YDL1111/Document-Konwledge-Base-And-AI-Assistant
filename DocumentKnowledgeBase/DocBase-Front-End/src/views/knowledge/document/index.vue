@@ -16,15 +16,17 @@ import { http } from "@/utils/http";
 import {
   addKnowledgeDocumentApi,
   auditKnowledgeDocumentApi,
+  deleteKnowledgeDocumentApi,
   getKnowledgeDocumentDetailApi,
   getKnowledgeDocumentDownloadUrl,
   getKnowledgeDocumentListApi,
   getKnowledgeDocumentPreviewApi,
-  type KnowledgeDocumentAddRequest,
+  updateKnowledgeDocumentApi,
   type KnowledgeDocumentAuditRequest,
   type KnowledgeDocumentDTO,
   type KnowledgeDocumentDetailDTO,
-  type KnowledgeDocumentQuery
+  type KnowledgeDocumentQuery,
+  type KnowledgeDocumentUpdateRequest
 } from "@/api/knowledge/document";
 import {
   getKnowledgeCategoryListApi,
@@ -54,9 +56,14 @@ const fileList = ref<UploadUserFile[]>([]);
 const selectedFile = ref<File>();
 const detailData = ref<KnowledgeDocumentDetailDTO>();
 const auditTarget = ref<KnowledgeDocumentDTO>();
+const dialogMode = ref<"add" | "edit">("add");
+const editingDocumentId = ref<number>();
 
 const canAudit = computed(() => hasAuth("knowledge:document:audit"));
-const canUpload = computed(() => hasAuth("knowledge:document:upload"));
+const canAdd = computed(() => hasAuth("knowledge:document:add"));
+const canEdit = computed(() => hasAuth("knowledge:document:edit"));
+const canRemove = computed(() => hasAuth("knowledge:document:remove"));
+const canIngest = computed(() => hasAuth("knowledge:document:ingest"));
 const canPreview = computed(() => hasAuth("knowledge:document:preview"));
 const canDownload = computed(() => hasAuth("knowledge:document:download"));
 const isPendingAuditFilter = computed(() => searchForm.status === 2);
@@ -74,13 +81,14 @@ const searchForm = reactive<KnowledgeDocumentQuery>({
   pageSize: 10
 });
 
-const formModel = reactive<KnowledgeDocumentAddRequest>({
+const formModel = reactive<KnowledgeDocumentUpdateRequest>({
   categoryId: undefined as unknown as number,
   title: "",
   docCode: "",
   summary: "",
   tags: "",
-  visibility: 2
+  visibility: 2,
+  versionRemark: ""
 });
 
 const auditForm = reactive<KnowledgeDocumentAuditRequest>({
@@ -192,6 +200,25 @@ function handleSizeChange(pageSize: number) {
 }
 
 function openAddDialog() {
+  dialogMode.value = "add";
+  editingDocumentId.value = undefined;
+  resetForm();
+  dialogVisible.value = true;
+}
+
+function openEditDialog(row: KnowledgeDocumentDTO) {
+  dialogMode.value = "edit";
+  editingDocumentId.value = row.documentId;
+  formModel.categoryId = row.categoryId as number;
+  formModel.title = row.title || "";
+  formModel.docCode = row.docCode || "";
+  formModel.summary = row.summary || "";
+  formModel.tags = row.tags || "";
+  formModel.visibility = row.visibility || 2;
+  formModel.versionRemark = "";
+  selectedFile.value = undefined;
+  fileList.value = [];
+  formRef.value?.clearValidate();
   dialogVisible.value = true;
 }
 
@@ -202,6 +229,8 @@ function resetForm() {
   formModel.summary = "";
   formModel.tags = "";
   formModel.visibility = 2;
+  formModel.versionRemark = "";
+  editingDocumentId.value = undefined;
   selectedFile.value = undefined;
   fileList.value = [];
   formRef.value?.clearValidate();
@@ -229,7 +258,7 @@ function handleFileRemove() {
 
 async function submitForm() {
   if (!formRef.value) return;
-  if (!selectedFile.value) {
+  if (dialogMode.value === "add" && !selectedFile.value) {
     message("请先选择要上传的文档文件", { type: "warning" });
     return;
   }
@@ -237,8 +266,17 @@ async function submitForm() {
     if (!valid) return;
     submitting.value = true;
     try {
-      await addKnowledgeDocumentApi({ ...formModel }, selectedFile.value as File);
-      message("文档已提交，当前状态为审核中", { type: "success" });
+      if (dialogMode.value === "edit" && editingDocumentId.value) {
+        await updateKnowledgeDocumentApi(
+          editingDocumentId.value,
+          { ...formModel },
+          selectedFile.value
+        );
+        message("文档已更新，当前状态为审核中", { type: "success" });
+      } else {
+        await addKnowledgeDocumentApi({ ...formModel }, selectedFile.value as File);
+        message("文档已提交，当前状态为审核中", { type: "success" });
+      }
       dialogVisible.value = false;
       resetForm();
       loadDocuments();
@@ -249,6 +287,21 @@ async function submitForm() {
       submitting.value = false;
     }
   });
+}
+
+async function handleDelete(row: KnowledgeDocumentDTO) {
+  try {
+    await deleteKnowledgeDocumentApi(row.documentId);
+    message("文档已删除，AI 知识库同步删除任务已触发", { type: "success" });
+    if (detailVisible.value && detailData.value?.documentId === row.documentId) {
+      detailVisible.value = false;
+      detailData.value = undefined;
+    }
+    loadDocuments();
+  } catch (error) {
+    console.error(error);
+    message("删除文档失败，请检查后端接口日志", { type: "error" });
+  }
 }
 
 async function openDetail(row: KnowledgeDocumentDTO) {
@@ -408,7 +461,7 @@ onMounted(() => {
             <el-button v-if="canAudit" plain @click="filterPendingAudit">
               待审核列表
             </el-button>
-            <el-button v-if="canUpload" type="primary" @click="openAddDialog">
+            <el-button v-if="canAdd" type="primary" @click="openAddDialog">
               新增文档
             </el-button>
           </div>
@@ -498,9 +551,17 @@ onMounted(() => {
             {{ formatTime(row.updateTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="220">
+        <el-table-column label="操作" fixed="right" width="320">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button
+              v-if="canEdit"
+              link
+              type="primary"
+              @click="openEditDialog(row)"
+            >
+              编辑
+            </el-button>
             <el-button
               v-if="canAudit && row.status === 2"
               link
@@ -510,7 +571,7 @@ onMounted(() => {
               审核
             </el-button>
             <el-button
-              v-if="row.status === 3 && !row.hasAiImport"
+              v-if="canIngest && row.status === 3 && !row.hasAiImport"
               link
               type="warning"
               :loading="importingDocId === row.documentId"
@@ -518,6 +579,18 @@ onMounted(() => {
             >
               导入知识库
             </el-button>
+            <el-popconfirm
+              v-if="canRemove"
+              title="确认删除该文档吗？删除后会同步清理 AI 知识库中的向量数据。"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              confirm-button-type="danger"
+              @confirm="handleDelete(row)"
+            >
+              <template #reference>
+                <el-button link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
           </template>
         </el-table-column>
         <template #empty>
@@ -539,7 +612,12 @@ onMounted(() => {
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新增文档" width="680px" @closed="handleDialogClosed">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogMode === 'add' ? '新增文档' : '编辑文档'"
+      width="680px"
+      @closed="handleDialogClosed"
+    >
       <el-form ref="formRef" :model="formModel" :rules="rules" label-width="90px">
         <el-form-item label="所属分类" prop="categoryId">
           <el-tree-select
@@ -567,7 +645,7 @@ onMounted(() => {
         <el-form-item label="文档编号" prop="docCode">
           <el-input v-model="formModel.docCode" maxlength="64" placeholder="可选，便于内部检索" />
         </el-form-item>
-        <el-form-item label="上传文件" required>
+        <el-form-item label="上传文件" :required="dialogMode === 'add'">
           <el-upload
             :auto-upload="false"
             :limit="1"
@@ -579,10 +657,21 @@ onMounted(() => {
             <el-button type="primary" plain>选择本地文件</el-button>
             <template #tip>
               <div class="upload-tip">
-                支持 PDF、Office、TXT、ZIP、RAR 等格式，首次上传后会自动生成版本号 `v1.0.0`。
+                {{
+                  dialogMode === "add"
+                    ? "支持 PDF、Office、TXT、ZIP、RAR 等格式，首次上传后会自动生成版本号 `v1.0.0`。"
+                    : "编辑时可不重新上传文件；如果选择新文件，审核通过后会生成新版本并重新同步到 AI 知识库。"
+                }}
               </div>
             </template>
           </el-upload>
+        </el-form-item>
+        <el-form-item v-if="dialogMode === 'edit'" label="版本说明" prop="versionRemark">
+          <el-input
+            v-model="formModel.versionRemark"
+            maxlength="500"
+            placeholder="可选，例如：修正文档内容并重新导入 AI 知识库"
+          />
         </el-form-item>
         <el-form-item label="文档摘要" prop="summary">
           <el-input
@@ -604,7 +693,11 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-alert
-          title="新增文档后状态默认为“审核中”，通过管理员审批后会自动变更为“已发布”。"
+          :title="
+            dialogMode === 'add'
+              ? '新增文档后状态默认为“审核中”，通过管理员审批后会自动变更为“已发布”。'
+              : '编辑文档后会重新进入“审核中”，审核通过后会自动创建新的导入任务，并在新版本成功后清理旧向量。'
+          "
           type="info"
           :closable="false"
         />
@@ -612,7 +705,9 @@ onMounted(() => {
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">提交</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitForm">
+          {{ dialogMode === "add" ? "提交" : "保存修改" }}
+        </el-button>
       </template>
     </el-dialog>
 

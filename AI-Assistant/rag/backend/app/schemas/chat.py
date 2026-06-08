@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     conv_id: Optional[int] = None
     question: str = Field(..., min_length=1)
     stream: bool = False
+    visible_doc_ids: Optional[List[int]] = None
 
 
 class MessageOut(BaseModel):

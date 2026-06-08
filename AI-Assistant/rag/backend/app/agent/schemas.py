@@ -35,6 +35,7 @@ class AgentRequest:
     conv_id: Optional[int] = None
     history: Optional[List[Dict[str, str]]] = None
     max_steps: int = 4
+    visible_doc_ids: Optional[List[int]] = None
 
 
 @dataclass

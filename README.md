@@ -26,8 +26,8 @@
 
 - 用户、角色、菜单、权限
 - 知识库分类管理
-- 文档上传、审核、发布、版本管理
-- 导入任务管理
+- 文档上传、审核、发布、版本管理、编辑与删除
+- 导入任务管理与 Python RAG 同步
 - AI 问答会话与消息持久化
 - Java 调 Python AI 服务
 - 为轻量 Agent 提供只读业务工具接口
@@ -84,9 +84,11 @@
 - 文档解析
 - 文档切片与向量化
 - 向量检索
+- 基于可见文档范围的检索过滤
 - RAG 问答
 - SSE 流式输出
 - 文档导入后的异步处理
+- 文档更新/删除后的向量数据同步
 - 轻量 Agent 的 Planner / Executor / Tools
 
 主要技术栈：
@@ -132,6 +134,8 @@ D:\ResumeProjects
 4. 用户执行导入任务，Java 调用 Python `/api/doc/upload`。
 5. Python 进行文档解析、切片、向量化并写入知识库。
 6. Java 记录 Python 侧文档 ID，并通过导入任务状态与 Python 文档状态建立同步关系。
+7. 如果文档后续更新，会重新进入审核与导入流程；新版本导入成功后，旧的 Python 文档和向量数据会被清理。
+8. 如果文档被删除，Java 会同步调用 Python 删除接口，避免 AI 继续召回旧内容。
 
 这个链路的重点是：  
 `文档主数据在 Java，AI 检索能力落在 Python。`
@@ -143,12 +147,14 @@ D:\ResumeProjects
 1. 用户在前端 AI 问答页提问。
 2. 前端请求 Java `/ai/chat/stream`。
 3. Java 创建或续用会话，保存用户消息。
-4. Java 调用 Python `/api/chat/stream`。
-5. Python 检索知识库并生成回答。
-6. Java 转发 SSE 给前端，同时把最终回答落库。
+4. Java 根据当前登录用户、知识库分类和导入任务状态计算可见文档范围。
+5. Java 调用 Python `/api/chat/stream`，并携带 `visible_doc_ids`。
+6. Python 在向量检索阶段按 `doc_id` 过滤，只召回当前用户有权限访问的文档片段。
+7. Python 基于召回片段生成回答并返回来源引用。
+8. Java 转发 SSE 给前端，同时把最终回答落库。
 
 这个链路的重点是：  
-`会话与权限体系在 Java，检索与生成在 Python。`
+`会话与权限体系在 Java，权限边界下沉到 Python 检索层，检索与生成在 Python。`
 
 ---
 
@@ -174,10 +180,12 @@ D:\ResumeProjects
 
 - 基础后台权限体系
 - 知识库分类管理
-- 文档上传、审核、发布、版本管理
+- 文档上传、审核、发布、版本管理、编辑、删除
 - 导入任务管理
 - AI 问答会话与消息持久化
 - Python RAG 对接
+- 权限下沉到 RAG 检索层
+- 文档更新/删除后的 Python 向量数据同步
 - Agent 只读工具接口
 
 ### 前端侧
@@ -194,6 +202,7 @@ D:\ResumeProjects
 - 文档上传与解析
 - 向量化入库
 - RAG 检索问答
+- 按 `visible_doc_ids` 过滤向量召回结果
 - SSE 流式事件输出
 - 轻量 Agent 第一版闭环
 
@@ -251,15 +260,22 @@ D:\ResumeProjects
 配置参考：
 - [application-dev.yml](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/docbase-admin/src/main/resources/application-dev.yml)
 
-如果你已经接入“导入任务 -> Python RAG 同步”能力，需要执行迁移脚本：
+公开仓库推荐使用脱敏后的快速启动脚本：
 
-- [migration-add-ingest-python-fields.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql)
+- [docbase_knowledge_public_bootstrap.sql](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/docbase_knowledge_public_bootstrap.sql)
+
+这个脚本包含当前项目需要的表结构和少量演示数据，不包含私人账号、聊天记录、上传文件路径或真实知识库内容。
 
 执行命令：
 
 ```bash
-mysql -u root -p123456 -D docbase_knowledge -e "source D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/migration-add-ingest-python-fields.sql"
+cd D:\ResumeProjects\DocumentKnowledgeBase\DocBase-Back-End\sql
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS docbase_knowledge DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_general_ci;"
+mysql -u root -p docbase_knowledge < docbase_knowledge_public_bootstrap.sql
 ```
+
+更多说明见：
+- [SQL README](D:/ResumeProjects/DocumentKnowledgeBase/DocBase-Back-End/sql/README.md)
 
 ---
 
@@ -281,6 +297,8 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python main.py
 ```
+
+注意：请确认命令行前缀已经进入 `venv`，不要直接用 Conda `base` 或全局 Python 启动，否则可能出现 `ModuleNotFoundError: fastapi` 等依赖缺失问题。
 
 或：
 
@@ -353,7 +371,7 @@ mvn test
 ```bash
 cd D:\ResumeProjects\DocumentKnowledgeBase\DocBase-Front-End
 pnpm dev
-pnpm typecheck
+pnpm.cmd typecheck
 pnpm build
 ```
 

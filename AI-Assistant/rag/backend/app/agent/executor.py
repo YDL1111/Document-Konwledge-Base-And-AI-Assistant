@@ -105,6 +105,8 @@ class AgentExecutor:
                 args = {}
             if "kb_id" not in args:
                 args["kb_id"] = request.kb_id
+            if tool_name == "search_kb" and "visible_doc_ids" not in args:
+                args["visible_doc_ids"] = request.visible_doc_ids
             # 兜底：search_kb 的 question 为空时，用原始用户问题填充
             if tool_name == "search_kb" and not args.get("question", "").strip():
                 args["question"] = request.question

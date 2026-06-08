@@ -238,7 +238,9 @@ class VectorStoreService:
         store = self.get_store(kb_id)
 
         where_filter = None
-        if filter_doc_ids:
+        if filter_doc_ids is not None:
+            if not filter_doc_ids:
+                return [], 0
             if len(filter_doc_ids) == 1:
                 where_filter = {"doc_id": str(filter_doc_ids[0])}
             else:

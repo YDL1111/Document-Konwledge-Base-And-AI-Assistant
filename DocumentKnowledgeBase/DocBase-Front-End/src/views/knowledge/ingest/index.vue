@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import dayjs from "dayjs";
 import {
   getKnowledgeIngestTaskListApi,
@@ -11,6 +11,7 @@ import {
   type KnowledgeIngestTaskQuery
 } from "@/api/knowledge/ingest";
 import { message } from "@/utils/message";
+import { hasAuth } from "@/router/utils";
 
 defineOptions({
   name: "KnowledgeIngestTask"
@@ -20,6 +21,8 @@ const loading = ref(false);
 const processing = ref(false);
 const dataList = ref<KnowledgeIngestTaskDTO[]>([]);
 const total = ref(0);
+const canRetry = computed(() => hasAuth("knowledge:ingest:retry"));
+const canDetail = computed(() => hasAuth("knowledge:ingest:detail"));
 
 const searchForm = reactive<KnowledgeIngestTaskQuery>({
   taskNo: "",
@@ -35,7 +38,9 @@ const taskTypeMap: Record<number, string> = {
   4: "删除向量"
 };
 
-const statusMap: Record<number, { label: string; type: string }> = {
+type TagType = "" | "success" | "warning" | "info" | "danger";
+
+const statusMap: Record<number, { label: string; type: TagType }> = {
   1: { label: "待处理", type: "info" },
   2: { label: "处理中", type: "warning" },
   3: { label: "成功", type: "success" },
@@ -234,7 +239,7 @@ onMounted(() => {
               执行
             </el-button>
             <el-button
-              v-if="row.status === 4"
+              v-if="canRetry && row.status === 4"
               link
               type="warning"
               @click="handleRetry(row)"
@@ -242,7 +247,7 @@ onMounted(() => {
               重试
             </el-button>
             <el-button
-              v-if="row.status === 2"
+              v-if="canDetail && row.status === 2"
               link
               type="info"
               @click="handlePoll(row)"

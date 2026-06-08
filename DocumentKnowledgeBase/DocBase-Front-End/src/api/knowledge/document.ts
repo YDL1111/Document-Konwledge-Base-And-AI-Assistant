@@ -72,6 +72,10 @@ export interface KnowledgeDocumentAddRequest {
   visibility: number;
 }
 
+export interface KnowledgeDocumentUpdateRequest extends KnowledgeDocumentAddRequest {
+  versionRemark?: string;
+}
+
 export interface KnowledgeDocumentAuditRequest {
   approved: number;
   auditRemark?: string;
@@ -125,6 +129,42 @@ export const addKnowledgeDocumentApi = (
         "Content-Type": "multipart/form-data"
       }
     }
+  );
+};
+
+export const updateKnowledgeDocumentApi = (
+  documentId: number,
+  data: KnowledgeDocumentUpdateRequest,
+  file?: File
+) => {
+  const formData = new FormData();
+  formData.append("categoryId", String(data.categoryId));
+  formData.append("title", data.title);
+  if (data.docCode) formData.append("docCode", data.docCode);
+  if (data.summary) formData.append("summary", data.summary);
+  if (data.tags) formData.append("tags", data.tags);
+  if (data.versionRemark) formData.append("versionRemark", data.versionRemark);
+  formData.append("visibility", String(data.visibility));
+  if (file) formData.append("file", file);
+
+  return http.request<ResponseData<void>>(
+    "put",
+    `/knowledge/documents/${documentId}`,
+    {
+      data: formData
+    },
+    {
+      headers: {
+        "Content-Type": "multipart/form-data"
+      }
+    }
+  );
+};
+
+export const deleteKnowledgeDocumentApi = (documentId: number) => {
+  return http.request<ResponseData<void>>(
+    "delete",
+    `/knowledge/documents/${documentId}`
   );
 };
 

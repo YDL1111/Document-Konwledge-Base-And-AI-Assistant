@@ -52,11 +52,13 @@ class RAGService:
         query: str,
         k: int = None,
         strategy: str = "similarity",
+        visible_doc_ids: Optional[List[int]] = None,
     ) -> Tuple[List[Tuple], bool]:
         k = k or settings.TOP_K
         started_at = time.time()
+        scoped_query = visible_doc_ids is not None
 
-        cached = await query_cache.get(kb_id, query, k)
+        cached = None if scoped_query else await query_cache.get(kb_id, query, k)
         if cached is not None:
             latency = (time.time() - started_at) * 1000
             log_retrieval(
@@ -74,6 +76,7 @@ class RAGService:
             query=query,
             k=k,
             strategy=strategy,
+            filter_doc_ids=visible_doc_ids,
         )
 
         latency = (time.time() - started_at) * 1000
@@ -87,7 +90,7 @@ class RAGService:
             filtered_count=filtered_out,
         )
 
-        if results:
+        if results and not scoped_query:
             await query_cache.set(kb_id, query, k, results)
 
         return results, False
@@ -148,10 +151,13 @@ class RAGService:
         question: str,
         history: Optional[List[dict]] = None,
         strategy: str = "similarity",
+        visible_doc_ids: Optional[List[int]] = None,
     ) -> Tuple[str, List[dict]]:
         history = history or []
 
-        results, _ = await self.retrieve(kb_id, question, strategy=strategy)
+        results, _ = await self.retrieve(
+            kb_id, question, strategy=strategy, visible_doc_ids=visible_doc_ids
+        )
         context, sources = self._build_context(results)
 
         log_prompt(
@@ -174,6 +180,7 @@ class RAGService:
         question: str,
         history: Optional[List[dict]] = None,
         strategy: str = "similarity",
+        visible_doc_ids: Optional[List[int]] = None,
     ) -> AsyncGenerator[str, None]:
         history = history or []
 
@@ -185,6 +192,7 @@ class RAGService:
             query=question,
             k=settings.TOP_K,
             strategy="hybrid",
+            visible_doc_ids=visible_doc_ids,
         )
         context, sources = self._build_context(results)
 

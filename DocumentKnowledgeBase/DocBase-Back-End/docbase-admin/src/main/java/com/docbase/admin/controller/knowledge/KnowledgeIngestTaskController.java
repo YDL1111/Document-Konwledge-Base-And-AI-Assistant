@@ -37,7 +37,7 @@ public class KnowledgeIngestTaskController extends BaseController {
     }
 
     @Operation(summary = "为文档创建导入任务")
-    @PreAuthorize("@permission.has('knowledge:ingest:list')")
+    @PreAuthorize("@permission.has('knowledge:document:ingest')")
     @PostMapping("/submit/{documentId}")
     public ResponseDTO<KnowledgeIngestTaskDTO> submit(@PathVariable Long documentId) {
         KnowledgeIngestTaskDTO task = knowledgeIngestTaskApplicationService.submitImportTask(documentId);
@@ -45,7 +45,7 @@ public class KnowledgeIngestTaskController extends BaseController {
     }
 
     @Operation(summary = "重试失败的导入任务")
-    @PreAuthorize("@permission.has('knowledge:ingest:list')")
+    @PreAuthorize("@permission.has('knowledge:ingest:retry')")
     @PostMapping("/{taskId}/retry")
     public ResponseDTO<KnowledgeIngestTaskDTO> retry(@PathVariable Long taskId) {
         KnowledgeIngestTaskDTO task = knowledgeIngestTaskApplicationService.retryTask(taskId);
@@ -61,7 +61,7 @@ public class KnowledgeIngestTaskController extends BaseController {
     }
 
     @Operation(summary = "查询任务在Python侧的处理状态")
-    @PreAuthorize("@permission.has('knowledge:ingest:list')")
+    @PreAuthorize("@permission.has('knowledge:ingest:detail')")
     @PostMapping("/{taskId}/poll")
     public ResponseDTO<KnowledgeIngestTaskDTO> pollStatus(@PathVariable Long taskId) {
         KnowledgeIngestTaskDTO task = knowledgeIngestTaskApplicationService.pollTaskStatus(taskId);

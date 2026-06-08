@@ -2,6 +2,7 @@ package com.docbase.infrastructure.client.python.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import java.util.List;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,4 +20,7 @@ public class PythonChatRequest {
     private String question;
 
     private Boolean stream;
+
+    @JsonProperty("visible_doc_ids")
+    private List<Integer> visibleDocIds;
 }

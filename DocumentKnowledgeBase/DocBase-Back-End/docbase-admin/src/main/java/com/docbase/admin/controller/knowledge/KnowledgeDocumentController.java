@@ -8,6 +8,7 @@ import com.docbase.common.core.page.PageDTO;
 import com.docbase.common.enums.common.BusinessTypeEnum;
 import com.docbase.domain.knowledge.document.KnowledgeDocumentApplicationService;
 import com.docbase.domain.knowledge.document.command.KnowledgeDocumentAddCommand;
+import com.docbase.domain.knowledge.document.command.KnowledgeDocumentUpdateCommand;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDTO;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDetailDTO;
 import com.docbase.domain.knowledge.document.query.KnowledgeDocumentQuery;
@@ -20,9 +21,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -90,12 +93,32 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     @Operation(summary = "新增文档")
-    @PreAuthorize("@permission.has('knowledge:document:upload')")
+    @PreAuthorize("@permission.has('knowledge:document:add')")
     @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.ADD)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseDTO<Void> add(@Valid KnowledgeDocumentAddCommand addCommand,
                                  @RequestParam("file") MultipartFile file) {
         knowledgeDocumentApplicationService.addDocument(addCommand, file);
+        return ResponseDTO.ok();
+    }
+
+    @Operation(summary = "更新文档")
+    @PreAuthorize("@permission.has('knowledge:document:edit')")
+    @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.MODIFY)
+    @PutMapping(value = "/{documentId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseDTO<Void> update(@PathVariable Long documentId,
+                                    @Valid KnowledgeDocumentUpdateCommand updateCommand,
+                                    @RequestParam(value = "file", required = false) MultipartFile file) {
+        knowledgeDocumentApplicationService.updateDocument(documentId, updateCommand, file);
+        return ResponseDTO.ok();
+    }
+
+    @Operation(summary = "删除文档")
+    @PreAuthorize("@permission.has('knowledge:document:remove')")
+    @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.DELETE)
+    @DeleteMapping("/{documentId}")
+    public ResponseDTO<Void> delete(@PathVariable Long documentId) {
+        knowledgeDocumentApplicationService.deleteDocument(documentId);
         return ResponseDTO.ok();
     }
 

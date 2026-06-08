@@ -98,7 +98,12 @@ async def send_message(body: ChatRequest, db: Session = Depends(get_db)):
 
     # RAG 推理
     try:
-        answer, sources = await rag_service.chat(body.kb_id, body.question, history)
+        answer, sources = await rag_service.chat(
+            body.kb_id,
+            body.question,
+            history,
+            visible_doc_ids=body.visible_doc_ids,
+        )
     except Exception as e:
         logger.error(f"RAG error: {e}")
         raise HTTPException(status_code=500, detail=f"推理失败: {str(e)}")
@@ -139,7 +144,12 @@ async def stream_message(body: ChatRequest, db: Session = Depends(get_db)):
         full_answer = ""
         final_sources = []
         try:
-            async for chunk in rag_service.chat_stream(body.kb_id, body.question, history):
+            async for chunk in rag_service.chat_stream(
+                body.kb_id,
+                body.question,
+                history,
+                visible_doc_ids=body.visible_doc_ids,
+            ):
                 yield chunk
                 # 解析最后的完整答案
                 if '"type": "done"' in chunk or '"type":"done"' in chunk:
@@ -217,6 +227,7 @@ async def agent_stream_message(body: ChatRequest, db: Session = Depends(get_db))
                 conv_id=conv.id,
                 history=history,
                 max_steps=settings.AGENT_MAX_STEPS,
+                visible_doc_ids=body.visible_doc_ids,
             )
             async for chunk in _agent_executor.run_stream(agent_request):
                 yield chunk

@@ -299,18 +299,32 @@ public class PythonAiClient {
             return;
         }
         try {
-            RestClient client = restClient();
-            client.delete()
-                    .uri("/api/doc/{docId}", docId)
-                    .headers(headers -> {
-                        if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
-                            headers.set("X-API-Key", properties.getApiKey());
-                        }
-                    })
-                    .retrieve()
-                    .toBodilessEntity();
+            URL url = new URL(buildUrl("/api/doc/" + docId));
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("DELETE");
+            connection.setConnectTimeout(properties.getConnectTimeoutMs());
+            connection.setReadTimeout(properties.getReadTimeoutMs());
+            if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
+                connection.setRequestProperty("X-API-Key", properties.getApiKey());
+            }
+
+            int statusCode = connection.getResponseCode();
+            if (statusCode >= 400 && statusCode != 404) {
+                InputStream errorStream = connection.getErrorStream() != null
+                        ? connection.getErrorStream() : connection.getInputStream();
+                String errorBody = readBody(errorStream);
+                log.error("Python document delete failed: status={}, body={}", statusCode, errorBody);
+                throw new ApiException(ErrorCode.Internal.INTERNAL_ERROR,
+                        "Python document delete failed: HTTP " + statusCode + ", " + errorBody);
+            }
+            connection.disconnect();
         } catch (Exception e) {
-            log.warn("Failed to delete Python document: docId={}", docId, e);
+            if (e instanceof ApiException apiException) {
+                throw apiException;
+            }
+            log.error("Failed to delete Python document: docId={}", docId, e);
+            throw new ApiException(ErrorCode.Internal.INTERNAL_ERROR,
+                    "Python document delete failed: " + e.getMessage());
         }
     }
 

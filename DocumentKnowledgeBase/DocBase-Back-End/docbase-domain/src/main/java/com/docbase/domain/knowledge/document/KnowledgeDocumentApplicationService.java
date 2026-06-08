@@ -14,6 +14,7 @@ import com.docbase.domain.knowledge.category.db.KnowledgeCategoryEntity;
 import com.docbase.domain.knowledge.category.db.KnowledgeCategoryService;
 import com.docbase.domain.knowledge.document.command.KnowledgeDocumentAddCommand;
 import com.docbase.domain.knowledge.document.command.KnowledgeDocumentAuditCommand;
+import com.docbase.domain.knowledge.document.command.KnowledgeDocumentUpdateCommand;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentAuditLogEntity;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentAuditLogService;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentEntity;
@@ -85,6 +86,7 @@ public class KnowledgeDocumentApplicationService {
                             doc -> doc.getCurrentVersionId() != null ? doc.getCurrentVersionId() : 0L));
             java.util.Set<Long> importedPairs = knowledgeIngestTaskService.lambdaQuery()
                     .eq(KnowledgeIngestTaskEntity::getStatus, KnowledgeIngestTaskApplicationService.STATUS_SUCCESS)
+                    .ne(KnowledgeIngestTaskEntity::getTaskType, KnowledgeIngestTaskApplicationService.TASK_TYPE_DELETE)
                     .in(KnowledgeIngestTaskEntity::getDocumentId, documentIds)
                     .list().stream()
                     .filter(t -> t.getVersionId() != null
@@ -396,5 +398,89 @@ public class KnowledgeDocumentApplicationService {
 
         entity.setCurrentVersionId(versionEntity.getVersionId());
         knowledgeDocumentService.updateById(entity);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void updateDocument(Long documentId, KnowledgeDocumentUpdateCommand command, MultipartFile file) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        KnowledgeDocumentEntity entity = getAccessibleDocument(
+            documentId,
+            loginUser.getUserId(),
+            loginUser.getDeptId(),
+            loginUser.isAdmin()
+        );
+        if (!loginUser.isAdmin() && !canAccessTargetDept(entity.getDeptId())) {
+            throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
+        }
+
+        boolean hasNewFile = file != null && !file.isEmpty();
+        entity.setCategoryId(command.getCategoryId());
+        entity.setTitle(command.getTitle());
+        entity.setDocCode(command.getDocCode());
+        entity.setSummary(command.getSummary());
+        entity.setTags(command.getTags());
+        entity.setVisibility(command.getVisibility());
+        entity.setAuditRemark(null);
+        entity.setStatus(KnowledgeDocumentConstant.Status.PENDING_AUDIT);
+
+        if (hasNewFile) {
+            knowledgeDocumentVersionService.lambdaUpdate()
+                .eq(KnowledgeDocumentVersionEntity::getDocumentId, documentId)
+                .eq(KnowledgeDocumentVersionEntity::getIsCurrent, Boolean.TRUE)
+                .set(KnowledgeDocumentVersionEntity::getIsCurrent, Boolean.FALSE)
+                .update();
+
+            String storedPath = FileUploadUtils.upload(UploadSubDir.DOCUMENT_PATH, file);
+            KnowledgeDocumentVersionEntity versionEntity = new KnowledgeDocumentVersionEntity();
+            versionEntity.setDocumentId(documentId);
+            versionEntity.setVersionNo(generateNextVersionNo(documentId));
+            versionEntity.setFileName(file.getOriginalFilename());
+            versionEntity.setFileExt(FileNameUtil.extName(file.getOriginalFilename()));
+            versionEntity.setFileSize(file.getSize());
+            versionEntity.setStorageType("local");
+            versionEntity.setStoragePath(storedPath);
+            versionEntity.setStorageUrl(ServletHolderUtil.getContextUrl() + storedPath);
+            versionEntity.setVersionRemark(
+                command.getVersionRemark() != null ? command.getVersionRemark() : "更新文档版本");
+            versionEntity.setParseStatus(1);
+            versionEntity.setIsCurrent(Boolean.TRUE);
+            knowledgeDocumentVersionService.save(versionEntity);
+
+            entity.setCurrentVersionId(versionEntity.getVersionId());
+            entity.setCurrentVersionNo(versionEntity.getVersionNo());
+        }
+
+        knowledgeDocumentService.updateById(entity);
+        log.info("Document updated and reset to pending audit: documentId={}, hasNewFile={}", documentId, hasNewFile);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteDocument(Long documentId) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        KnowledgeDocumentEntity entity = getAccessibleDocument(
+            documentId,
+            loginUser.getUserId(),
+            loginUser.getDeptId(),
+            loginUser.isAdmin()
+        );
+        if (!loginUser.isAdmin() && !canAccessTargetDept(entity.getDeptId())) {
+            throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
+        }
+
+        knowledgeIngestTaskApplicationService.syncDeleteDocument(documentId);
+        knowledgeDocumentVersionService.remove(
+            new LambdaQueryWrapper<KnowledgeDocumentVersionEntity>()
+                .eq(KnowledgeDocumentVersionEntity::getDocumentId, documentId)
+        );
+        knowledgeDocumentService.removeById(documentId);
+        log.info("Document deleted and Python RAG delete sync triggered: documentId={}", documentId);
+    }
+
+    private String generateNextVersionNo(Long documentId) {
+        long versionCount = knowledgeDocumentVersionService.count(
+            new LambdaQueryWrapper<KnowledgeDocumentVersionEntity>()
+                .eq(KnowledgeDocumentVersionEntity::getDocumentId, documentId)
+        );
+        return "v" + (versionCount + 1) + ".0.0";
     }
 }
