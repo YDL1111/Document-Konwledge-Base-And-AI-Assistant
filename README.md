@@ -111,7 +111,6 @@
 D:\ResumeProjects
 ├─ README.md
 ├─ docs
-│  ├─ Codex会话交接-当前进度.md
 │  ├─ 知识库管理-导入任务-Python-RAG-落地设计稿.md
 │  └─ 轻量agent升级计划.md
 ├─ DocumentKnowledgeBase
@@ -425,10 +424,3 @@ uvicorn main:app --reload --port 8000
 重点确认：
 
 - `VITE_APP_BASE_API`
-
-## docs 目录补充文档
-
-当前比较重要的补充文档有：
-
-- [知识库管理-导入任务-Python-RAG-落地设计稿.md](D:/ResumeProjects/docs/知识库管理-导入任务-Python-RAG-落地设计稿.md)
-- [轻量agent升级计划.md](D:/ResumeProjects/docs/轻量agent升级计划.md)
