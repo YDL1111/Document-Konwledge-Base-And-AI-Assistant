@@ -1,66 +1,83 @@
 """
-Java 后端只读业务接口工具
+Java backend read-only tools for Agent.
 """
-import json
-from typing import Any, Dict, Optional
-from urllib.parse import urlencode
+
+from typing import Any, Dict, List, Optional
 
 import httpx
+from loguru import logger
 
 from app.agent.tools.base import BaseTool
 from app.core.config import settings
 
-# Java 后端基础地址（可从配置或环境变量读取）
+
 JAVA_BASE_URL = getattr(settings, "JAVA_BASE_URL", "http://localhost:8080")
-JAVA_API_KEY = getattr(settings, "JAVA_API_KEY", "")
+JAVA_API_KEY = getattr(settings, "INTERNAL_API_KEY", "") or getattr(
+    settings, "JAVA_API_KEY", ""
+)
 
 
-async def _java_get(path: str, params: Optional[dict] = None) -> dict:
-    """调用 Java 后端 GET 接口"""
-    url = f"{JAVA_BASE_URL.rstrip('/')}{path}"
+def _status_text(status: Optional[int], status_map: Dict[int, str]) -> str:
+    return status_map.get(status or 0, "unknown")
+
+
+def _trim(value: Optional[str], length: int = 160) -> str:
+    text = (value or "").strip()
+    if len(text) <= length:
+        return text
+    return text[: length - 3] + "..."
+
+
+def _build_headers() -> Dict[str, str]:
     headers = {"Accept": "application/json"}
     if JAVA_API_KEY:
         headers["X-API-Key"] = JAVA_API_KEY
+    return headers
 
-    from loguru import logger
 
+async def _java_get(path: str, params: Optional[dict] = None) -> dict:
+    if not JAVA_API_KEY:
+        raise RuntimeError(
+            "Java Agent tools are unavailable because INTERNAL_API_KEY / JAVA_API_KEY is not configured."
+        )
+
+    url = f"{JAVA_BASE_URL.rstrip('/')}{path}"
     try:
-        # trust_env=False 防止 Windows 系统代理干扰 localhost 请求
         async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
-            logger.info(f"Agent 调用 Java: {url} params={params}")
-            resp = await client.get(url, params=params, headers=headers)
-            logger.info(f"Java 响应: HTTP {resp.status_code}")
+            logger.info(f"Agent calling Java GET: {url} params={params}")
+            resp = await client.get(url, params=params, headers=_build_headers())
+            logger.info(f"Agent Java response: {resp.status_code} url={url}")
             resp.raise_for_status()
-            return resp.json()
-    except httpx.ConnectError:
-        logger.error(f"无法连接 Java 后端: {url}，请确认 Java 服务已启动且端口正确")
-        raise RuntimeError(f"无法连接 Java 后端({JAVA_BASE_URL})，请确认服务已启动")
-    except httpx.HTTPStatusError as e:
-        status = e.response.status_code
-        logger.error(f"Java 接口返回错误: {url} HTTP {status}: {e.response.text[:300]}")
+            payload = resp.json()
+    except httpx.ConnectError as exc:
+        logger.error(f"Java service connect error: {url} | {exc}")
+        raise RuntimeError(f"Cannot connect to Java backend: {JAVA_BASE_URL}") from exc
+    except httpx.TimeoutException as exc:
+        logger.error(f"Java service timeout: {url}")
+        raise RuntimeError(f"Java backend timeout: {path}") from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        body = exc.response.text[:300]
+        logger.error(f"Java HTTP error {status}: {url} body={body}")
+        if status in (401, 403):
+            raise RuntimeError(
+                f"Java backend rejected Agent tool request ({status}). Check API key and admin-only access."
+            ) from exc
         if status == 404:
-            raise RuntimeError(
-                f"Java 接口不存在(404): {path}。"
-                "请确认 Java 后端已重启加载最新的 AgentToolsController。"
-            )
-        elif status == 502 or status == 503:
-            raise RuntimeError(
-                f"Java 服务暂时不可用({status}): {path}。"
-                "请确认 Java 后端已重启（加载 AiChatController 新增的 agent/tools 方法）。"
-            )
-        else:
-            raise RuntimeError(f"Java 接口错误 HTTP {status}: {path}")
-    except httpx.TimeoutException:
-        logger.error(f"Java 接口超时: {url}")
-        raise RuntimeError(f"Java 后端响应超时({JAVA_BASE_URL})，请检查服务状态")
+            raise RuntimeError(f"Java Agent endpoint not found: {path}") from exc
+        raise RuntimeError(f"Java backend HTTP {status}: {path}") from exc
+
+    if payload.get("code") != 0:
+        raise RuntimeError(payload.get("msg") or f"Java backend business error: {path}")
+
+    return payload.get("data")
 
 
 class ListIngestTasksTool(BaseTool):
     name = "list_ingest_tasks"
     description = (
-        "查询导入任务列表。支持按状态筛选（1=待处理, 2=处理中, 3=成功, 4=失败）。"
-        "适用于回答'最近有哪些失败的导入任务'、'有哪些正在处理的导入'等问题。"
-        "返回任务编号、状态、文档ID、错误信息等。"
+        "List ingest tasks for administrator troubleshooting. Suitable for questions such as "
+        "'which tasks failed recently', 'how many are processing', or 'which document import is abnormal'."
     )
 
     def parameters_schema(self) -> dict:
@@ -69,94 +86,99 @@ class ListIngestTasksTool(BaseTool):
             "properties": {
                 "status": {
                     "type": "integer",
-                    "description": "任务状态筛选：1=待处理, 2=处理中, 3=成功, 4=失败",
+                    "description": "Optional task status filter: 1=pending, 2=processing, 3=success, 4=failed.",
+                },
+                "document_id": {
+                    "type": "integer",
+                    "description": "Optional document ID filter.",
                 },
                 "page_size": {
                     "type": "integer",
-                    "description": "返回条数，默认10",
+                    "description": "How many tasks to return, default 10 and max 30.",
                 },
             },
         }
 
     async def run(self, **kwargs) -> Dict[str, Any]:
         status = kwargs.get("status")
-        page_size = kwargs.get("page_size", 10)
+        document_id = kwargs.get("document_id")
+        page_size = min(max(int(kwargs.get("page_size", 10)), 1), 30)
 
-        params = {"pageNum": 1, "pageSize": page_size}
+        params: Dict[str, Any] = {"pageNum": 1, "pageSize": page_size}
         if status is not None:
             params["status"] = status
+        if document_id is not None:
+            params["documentId"] = document_id
+
+        status_map = {1: "pending", 2: "processing", 3: "success", 4: "failed"}
 
         try:
-            data = await _java_get("/ai/chat/agent/tools/ingest-tasks", params)
-            if data.get("code") == 0:
-                page = data.get("data", {})
-                rows = page.get("rows", [])
-                status_map = {1: "待处理", 2: "处理中", 3: "成功", 4: "失败"}
-                tasks = []
-                for t in rows:
-                    tasks.append(
-                        {
-                            "task_id": t.get("taskId"),
-                            "task_no": t.get("taskNo"),
-                            "document_id": t.get("documentId"),
-                            "status": t.get("status"),
-                            "status_text": status_map.get(t.get("status"), "未知"),
-                            "error_message": t.get("errorMessage"),
-                            "chunk_count": t.get("chunkCount"),
-                            "started_time": t.get("startedTime"),
-                            "finished_time": t.get("finishedTime"),
-                        }
-                    )
-                # 构建状态统计摘要，让 LLM 直接看到关键数据
-                status_counts = {1: 0, 2: 0, 3: 0, 4: 0}
-                for t in tasks:
-                    st = t.get("status")
-                    if st in status_counts:
-                        status_counts[st] += 1
-                stats_parts = [f"{status_map[s]}{c}个" for s, c in status_counts.items() if c > 0]
-                stats_text = "、".join(stats_parts)
+            page = await _java_get("/ai/chat/agent/tools/ingest-tasks", params)
+            rows = page.get("rows", []) if isinstance(page, dict) else []
 
-                summary = (
-                    f"共 {page.get('total', 0)} 个导入任务。"
-                    f"状态分布：{stats_text if stats_text else '无数据'}。"
+            tasks: List[Dict[str, Any]] = []
+            counts = {1: 0, 2: 0, 3: 0, 4: 0}
+            for row in rows:
+                task_status = row.get("status")
+                if task_status in counts:
+                    counts[task_status] += 1
+                tasks.append(
+                    {
+                        "task_id": row.get("taskId"),
+                        "task_no": row.get("taskNo"),
+                        "document_id": row.get("documentId"),
+                        "version_id": row.get("versionId"),
+                        "status": task_status,
+                        "status_text": _status_text(task_status, status_map),
+                        "retry_count": row.get("retryCount"),
+                        "chunk_count": row.get("chunkCount"),
+                        "python_kb_id": row.get("pythonKbId"),
+                        "python_doc_id": row.get("pythonDocId"),
+                        "error_message": row.get("errorMessage"),
+                        "started_time": row.get("startedTime"),
+                        "finished_time": row.get("finishedTime"),
+                    }
                 )
-                # 附加每个任务的关键信息到 summary 中
-                detail_lines = []
-                for t in tasks[:8]:
-                    detail_lines.append(
-                        f"  - [{t['task_no']}] 状态={t['status_text']}"
-                        + (f" 错误={t.get('error_message', '')[:80]}" if t.get("error_message") else "")
-                    )
-                if detail_lines:
-                    summary += "\n" + "\n".join(detail_lines)
 
-                return {
-                    "success": True,
-                    "summary": summary,
-                    "data": {"total": page.get("total"), "tasks": tasks},
-                    "error": None,
-                }
-            else:
-                return {
-                    "success": False,
-                    "summary": f"Java 接口返回错误: {data.get('msg', '未知错误')}",
-                    "data": None,
-                    "error": data.get("msg"),
-                }
-        except Exception as e:
+            stats = ", ".join(
+                f"{label}={counts[code]}" for code, label in status_map.items() if counts[code] > 0
+            ) or "no task stats"
+            detail_lines = [
+                (
+                    f"[{task['task_no']}] doc={task['document_id']} "
+                    f"status={task['status_text']} "
+                    f"pythonDoc={task['python_doc_id'] or '-'} "
+                    f"error={_trim(task['error_message'], 60) or '-'}"
+                )
+                for task in tasks[:8]
+            ]
+            summary = f"Found {page.get('total', 0)} ingest tasks. Status distribution: {stats}."
+            if detail_lines:
+                summary += " " + " | ".join(detail_lines)
+
+            return {
+                "success": True,
+                "summary": summary,
+                "data": {
+                    "total": page.get("total", 0),
+                    "tasks": tasks,
+                    "status_counts": counts,
+                },
+                "error": None,
+            }
+        except Exception as exc:
             return {
                 "success": False,
-                "summary": f"查询导入任务失败: {str(e)}",
+                "summary": f"Failed to query ingest tasks: {exc}",
                 "data": None,
-                "error": str(e),
+                "error": str(exc),
             }
 
 
 class GetIngestTaskDetailTool(BaseTool):
     name = "get_ingest_task_detail"
     description = (
-        "查询单个导入任务的详细信息，包括失败原因、处理时间、关联的知识库和文档ID等。"
-        "适用于用户询问某个具体导入任务的详情或失败原因。"
+        "Get one ingest task in detail, including Python sync IDs, chunk count, retry count and failure message."
     )
 
     def parameters_schema(self) -> dict:
@@ -165,8 +187,8 @@ class GetIngestTaskDetailTool(BaseTool):
             "properties": {
                 "task_id": {
                     "type": "integer",
-                    "description": "导入任务ID",
-                },
+                    "description": "Ingest task ID.",
+                }
             },
             "required": ["task_id"],
         }
@@ -176,56 +198,59 @@ class GetIngestTaskDetailTool(BaseTool):
         if not task_id:
             return {
                 "success": False,
-                "summary": "缺少 task_id 参数",
+                "summary": "task_id is required",
                 "data": None,
                 "error": "missing task_id",
             }
 
+        status_map = {1: "pending", 2: "processing", 3: "success", 4: "failed"}
         try:
-            data = await _java_get(f"/ai/chat/agent/tools/ingest-task/{task_id}")
-            if data.get("code") == 0:
-                t = data.get("data", {})
-                status_map = {1: "待处理", 2: "处理中", 3: "成功", 4: "失败"}
-                return {
-                    "success": True,
-                    "summary": f"任务 {t.get('taskNo')} 详情：状态={status_map.get(t.get('status'), '未知')}",
-                    "data": {
-                        "task_id": t.get("taskId"),
-                        "task_no": t.get("taskNo"),
-                        "document_id": t.get("documentId"),
-                        "status": t.get("status"),
-                        "status_text": status_map.get(t.get("status"), "未知"),
-                        "error_message": t.get("errorMessage"),
-                        "chunk_count": t.get("chunkCount"),
-                        "retry_count": t.get("retryCount"),
-                        "python_kb_id": t.get("pythonKbId"),
-                        "python_doc_id": t.get("pythonDocId"),
-                        "started_time": t.get("startedTime"),
-                        "finished_time": t.get("finishedTime"),
-                    },
-                    "error": None,
-                }
-            else:
-                return {
-                    "success": False,
-                    "summary": f"Java 接口返回错误: {data.get('msg', '未知错误')}",
-                    "data": None,
-                    "error": data.get("msg"),
-                }
-        except Exception as e:
+            row = await _java_get(f"/ai/chat/agent/tools/ingest-task/{task_id}")
+            data = {
+                "task_id": row.get("taskId"),
+                "task_no": row.get("taskNo"),
+                "document_id": row.get("documentId"),
+                "version_id": row.get("versionId"),
+                "task_type": row.get("taskType"),
+                "status": row.get("status"),
+                "status_text": _status_text(row.get("status"), status_map),
+                "retry_count": row.get("retryCount"),
+                "chunk_count": row.get("chunkCount"),
+                "trace_id": row.get("traceId"),
+                "python_kb_id": row.get("pythonKbId"),
+                "python_doc_id": row.get("pythonDocId"),
+                "error_message": row.get("errorMessage"),
+                "started_time": row.get("startedTime"),
+                "finished_time": row.get("finishedTime"),
+            }
+            summary = (
+                f"Task {data['task_no']} is {data['status_text']}. "
+                f"document={data['document_id']}, version={data['version_id']}, "
+                f"pythonKb={data['python_kb_id'] or '-'}, pythonDoc={data['python_doc_id'] or '-'}, "
+                f"chunkCount={data['chunk_count'] or 0}, retryCount={data['retry_count'] or 0}."
+            )
+            if data["error_message"]:
+                summary += f" Error: {_trim(data['error_message'], 120)}."
+
+            return {
+                "success": True,
+                "summary": summary,
+                "data": data,
+                "error": None,
+            }
+        except Exception as exc:
             return {
                 "success": False,
-                "summary": f"查询任务详情失败: {str(e)}",
+                "summary": f"Failed to query ingest task detail: {exc}",
                 "data": None,
-                "error": str(e),
+                "error": str(exc),
             }
 
 
 class GetDocumentDetailTool(BaseTool):
     name = "get_document_detail"
     description = (
-        "根据文档ID查询文档基本信息，包括标题、分类、摘要、状态、版本号等。"
-        "适用于用户询问某个具体文档的详情、状态或元数据。"
+        "Get one business document's metadata, including title, category, status, visibility, version and audit remark."
     )
 
     def parameters_schema(self) -> dict:
@@ -234,55 +259,75 @@ class GetDocumentDetailTool(BaseTool):
             "properties": {
                 "document_id": {
                     "type": "integer",
-                    "description": "文档ID",
-                },
+                    "description": "Business document ID.",
+                }
             },
             "required": ["document_id"],
         }
 
     async def run(self, **kwargs) -> Dict[str, Any]:
-        doc_id = kwargs.get("document_id")
-        if not doc_id:
-            return {"success": False, "summary": "缺少 document_id 参数", "data": None, "error": "missing document_id"}
+        document_id = kwargs.get("document_id")
+        if not document_id:
+            return {
+                "success": False,
+                "summary": "document_id is required",
+                "data": None,
+                "error": "missing document_id",
+            }
+
+        status_map = {1: "draft", 2: "pending_audit", 3: "published", 4: "rejected", 5: "archived"}
+        visibility_map = {1: "public", 2: "department", 3: "private"}
 
         try:
-            data = await _java_get(f"/ai/chat/agent/tools/document/{doc_id}")
-            if data.get("code") == 0:
-                d = data.get("data", {})
-                status_map = {1: "草稿", 2: "待审核", 3: "已发布", 4: "已驳回", 5: "已归档"}
-                return {
-                    "success": True,
-                    "summary": (
-                        f"文档「{d.get('title', '未知')}」："
-                        f"状态={status_map.get(d.get('status'), '未知')}，"
-                        f"分类ID={d.get('categoryId')}，"
-                        f"版本={d.get('currentVersionNo', '无')}"
-                    ),
-                    "data": {
-                        "document_id": d.get("documentId"),
-                        "title": d.get("title"),
-                        "category_id": d.get("categoryId"),
-                        "summary": d.get("summary"),
-                        "tags": d.get("tags"),
-                        "status": d.get("status"),
-                        "status_text": status_map.get(d.get("status"), "未知"),
-                        "current_version_no": d.get("currentVersionNo"),
-                        "creator_id": d.get("creatorId"),
-                        "update_time": d.get("updateTime"),
-                    },
-                    "error": None,
-                }
-            return {"success": False, "summary": f"查询失败: {data.get('msg')}", "data": None, "error": data.get("msg")}
-        except Exception as e:
-            return {"success": False, "summary": f"查询文档详情失败: {str(e)}", "data": None, "error": str(e)}
+            row = await _java_get(f"/ai/chat/agent/tools/document/{document_id}")
+            data = {
+                "document_id": row.get("documentId"),
+                "title": row.get("title"),
+                "doc_code": row.get("docCode"),
+                "category_id": row.get("categoryId"),
+                "dept_id": row.get("deptId"),
+                "status": row.get("status"),
+                "status_text": _status_text(row.get("status"), status_map),
+                "visibility": row.get("visibility"),
+                "visibility_text": _status_text(row.get("visibility"), visibility_map),
+                "current_version_no": row.get("currentVersionNo"),
+                "summary": row.get("summary"),
+                "tags": row.get("tags"),
+                "audit_remark": row.get("auditRemark"),
+                "creator_id": row.get("creatorId"),
+                "update_time": row.get("updateTime"),
+                "has_ai_import": row.get("hasAiImport"),
+            }
+            summary = (
+                f"Document {data['document_id']} '{data['title']}' is {data['status_text']} "
+                f"under category {data['category_id']}, visibility={data['visibility_text']}, "
+                f"version={data['current_version_no'] or '-'}."
+            )
+            if data["summary"]:
+                summary += f" Summary: {_trim(data['summary'], 100)}."
+            if data["audit_remark"]:
+                summary += f" Audit remark: {_trim(data['audit_remark'], 80)}."
+
+            return {
+                "success": True,
+                "summary": summary,
+                "data": data,
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "summary": f"Failed to query document detail: {exc}",
+                "data": None,
+                "error": str(exc),
+            }
 
 
 class ListDocumentsByCategoryTool(BaseTool):
     name = "list_documents_by_category"
     description = (
-        "按分类查询文档列表，支持按状态筛选。"
-        "文档状态码：1=草稿, 2=待审核, 3=已发布, 4=已驳回, 5=已归档。"
-        "适用于用户询问'某个分类下有哪些文档'、'已发布的文档有哪些'等问题。"
+        "List business documents by category and optional status. Suitable for questions such as "
+        "'which published documents are under category 8' or 'what documents can be imported to AI'."
     )
 
     def parameters_schema(self) -> dict:
@@ -291,15 +336,15 @@ class ListDocumentsByCategoryTool(BaseTool):
             "properties": {
                 "category_id": {
                     "type": "integer",
-                    "description": "分类ID（可选，不传则查全部）",
+                    "description": "Optional category ID filter.",
                 },
                 "status": {
                     "type": "integer",
-                    "description": "文档状态筛选（可选）：1=草稿, 2=待审核, 3=已发布, 4=已驳回, 5=已归档",
+                    "description": "Optional document status filter: 1=draft, 2=pending audit, 3=published, 4=rejected, 5=archived.",
                 },
                 "page_size": {
                     "type": "integer",
-                    "description": "返回条数，默认10",
+                    "description": "How many documents to return, default 10 and max 30.",
                 },
             },
         }
@@ -307,59 +352,146 @@ class ListDocumentsByCategoryTool(BaseTool):
     async def run(self, **kwargs) -> Dict[str, Any]:
         category_id = kwargs.get("category_id")
         status = kwargs.get("status")
-        page_size = kwargs.get("page_size", 10)
-        params = {"pageNum": 1, "pageSize": page_size}
+        page_size = min(max(int(kwargs.get("page_size", 10)), 1), 30)
+        params: Dict[str, Any] = {"pageNum": 1, "pageSize": page_size}
         if category_id is not None:
             params["categoryId"] = category_id
         if status is not None:
             params["status"] = status
 
+        status_map = {1: "draft", 2: "pending_audit", 3: "published", 4: "rejected", 5: "archived"}
+        visibility_map = {1: "public", 2: "department", 3: "private"}
+
         try:
-            data = await _java_get("/ai/chat/agent/tools/documents", params)
-            if data.get("code") == 0:
-                page = data.get("data", {})
-                rows = page.get("rows", [])
-                status_map = {1: "草稿", 2: "待审核", 3: "已发布", 4: "已驳回", 5: "已归档"}
-                docs = []
-                for d in rows:
-                    docs.append({
-                        "document_id": d.get("documentId"),
-                        "title": d.get("title"),
-                        "category_id": d.get("categoryId"),
-                        "status": d.get("status"),
-                        "status_text": status_map.get(d.get("status"), "未知"),
-                        "current_version_no": d.get("currentVersionNo"),
-                        "summary": (d.get("summary") or "")[:150],
-                        "update_time": d.get("updateTime"),
-                    })
+            page = await _java_get("/ai/chat/agent/tools/documents", params)
+            rows = page.get("rows", []) if isinstance(page, dict) else []
 
-                # 统计状态分布
-                status_counts = {}
-                for d in docs:
-                    st = d["status_text"]
-                    status_counts[st] = status_counts.get(st, 0) + 1
-                stats_text = "、".join(f"{k}{v}个" for k, v in status_counts.items())
+            documents: List[Dict[str, Any]] = []
+            status_counts: Dict[str, int] = {}
+            for row in rows:
+                status_text = _status_text(row.get("status"), status_map)
+                visibility_text = _status_text(row.get("visibility"), visibility_map)
+                status_counts[status_text] = status_counts.get(status_text, 0) + 1
+                documents.append(
+                    {
+                        "document_id": row.get("documentId"),
+                        "title": row.get("title"),
+                        "doc_code": row.get("docCode"),
+                        "category_id": row.get("categoryId"),
+                        "dept_id": row.get("deptId"),
+                        "status": row.get("status"),
+                        "status_text": status_text,
+                        "visibility": row.get("visibility"),
+                        "visibility_text": visibility_text,
+                        "current_version_no": row.get("currentVersionNo"),
+                        "summary": row.get("summary"),
+                        "tags": row.get("tags"),
+                        "creator_id": row.get("creatorId"),
+                        "update_time": row.get("updateTime"),
+                        "has_ai_import": row.get("hasAiImport"),
+                    }
+                )
 
-                return {
-                    "success": True,
-                    "summary": (
-                        f"共 {page.get('total', 0)} 个文档（当前页 {len(docs)} 条）。"
-                        + (f"状态分布：{stats_text}。" if stats_text else "")
-                    ),
-                    "data": {"total": page.get("total"), "documents": docs},
-                    "error": None,
+            stats = ", ".join(f"{k}={v}" for k, v in status_counts.items()) or "no document stats"
+            detail_lines = [
+                (
+                    f"[{doc['document_id']}] {doc['title']} "
+                    f"status={doc['status_text']} visibility={doc['visibility_text']} "
+                    f"version={doc['current_version_no'] or '-'} aiImport={doc['has_ai_import']}"
+                )
+                for doc in documents[:8]
+            ]
+            summary = f"Found {page.get('total', 0)} documents. Status distribution: {stats}."
+            if detail_lines:
+                summary += " " + " | ".join(detail_lines)
+
+            return {
+                "success": True,
+                "summary": summary,
+                "data": {
+                    "total": page.get("total", 0),
+                    "documents": documents,
+                    "status_counts": status_counts,
+                },
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "summary": f"Failed to query documents: {exc}",
+                "data": None,
+                "error": str(exc),
+            }
+
+
+class ListCategoriesTool(BaseTool):
+    name = "list_categories"
+    description = (
+        "List direct child categories under one parent category. Suitable for questions such as "
+        "'what subcategories are under category 1' or 'show the children of category 8'."
+    )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "parent_id": {
+                    "type": "integer",
+                    "description": "Parent category ID. Omit or use 0 for root categories.",
                 }
-            return {"success": False, "summary": f"查询失败: {data.get('msg')}", "data": None, "error": data.get("msg")}
-        except Exception as e:
-            return {"success": False, "summary": f"查询文档列表失败: {str(e)}", "data": None, "error": str(e)}
+            },
+        }
+
+    async def run(self, **kwargs) -> Dict[str, Any]:
+        parent_id = kwargs.get("parent_id", 0)
+        params: Dict[str, Any] = {"parentId": parent_id}
+
+        try:
+            rows = await _java_get("/ai/chat/agent/tools/categories", params)
+            categories: List[Dict[str, Any]] = []
+            for row in rows or []:
+                categories.append(
+                    {
+                        "category_id": row.get("categoryId"),
+                        "parent_id": row.get("parentId"),
+                        "category_name": row.get("categoryName"),
+                        "dept_id": row.get("deptId"),
+                        "status": row.get("status"),
+                        "sort_num": row.get("sortNum"),
+                        "remark": row.get("remark"),
+                    }
+                )
+
+            detail_lines = [
+                f"[{item['category_id']}] {item['category_name']} status={item['status']}"
+                for item in categories[:10]
+            ]
+            summary = f"Found {len(categories)} child categories under parent {parent_id}."
+            if detail_lines:
+                summary += " " + " | ".join(detail_lines)
+
+            return {
+                "success": True,
+                "summary": summary,
+                "data": {
+                    "parent_id": parent_id,
+                    "categories": categories,
+                },
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "summary": f"Failed to query categories: {exc}",
+                "data": None,
+                "error": str(exc),
+            }
 
 
 class GetKbMappingInfoTool(BaseTool):
     name = "get_kb_mapping_info"
     description = (
-        "查询 Java 业务分类与 Python 知识库的映射关系。"
-        "返回默认知识库ID及各分类对应的知识库ID。"
-        "适用于用户询问'某个文档会导入到哪个知识库'、'分类和知识库的对应关系'等问题。"
+        "Get the mapping between Java business categories and Python knowledge-base IDs, including the default kb."
     )
 
     def parameters_schema(self) -> dict:
@@ -368,145 +500,26 @@ class GetKbMappingInfoTool(BaseTool):
     async def run(self, **kwargs) -> Dict[str, Any]:
         try:
             data = await _java_get("/ai/chat/agent/tools/kb-mapping")
-            if data.get("code") == 0:
-                info = data.get("data", {})
-                default_kb = info.get("defaultKbId", "未知")
-                mappings = info.get("categoryMappings", {})
-                mapping_text = "、".join(f"分类{cid}→KB{kid}" for cid, kid in mappings.items())
-                return {
-                    "success": True,
-                    "summary": f"默认知识库ID={default_kb}。分类映射：{mapping_text if mapping_text else '无'}。",
-                    "data": {"default_kb_id": default_kb, "category_mappings": mappings},
-                    "error": None,
-                }
-            return {"success": False, "summary": f"查询失败: {data.get('msg')}", "data": None, "error": data.get("msg")}
-        except Exception as e:
-            return {"success": False, "summary": f"查询KB映射失败: {str(e)}", "data": None, "error": str(e)}
+            default_kb_id = data.get("defaultKbId")
+            mappings = data.get("categoryMappings") or {}
+            normalized = {str(key): value for key, value in mappings.items()}
+            mapping_text = ", ".join(
+                f"category {key} -> kb {value}" for key, value in normalized.items()
+            ) or "no mappings"
 
-
-class ListChatSessionsTool(BaseTool):
-    name = "list_chat_sessions"
-    description = (
-        "查询AI问答的聊天会话列表，返回会话标题、最后消息时间等信息。"
-        "适用于用户询问'最近有哪些对话'、'当前有多少个会话'等问题。"
-    )
-
-    def parameters_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "page_size": {
-                    "type": "integer",
-                    "description": "返回条数，默认10",
+            return {
+                "success": True,
+                "summary": f"Default kb is {default_kb_id}. Category mappings: {mapping_text}.",
+                "data": {
+                    "default_kb_id": default_kb_id,
+                    "category_mappings": normalized,
                 },
-            },
-        }
-
-    async def run(self, **kwargs) -> Dict[str, Any]:
-        page_size = kwargs.get("page_size", 10)
-        try:
-            data = await _java_get("/ai/chat/agent/tools/chat-sessions", {"pageNum": 1, "pageSize": page_size})
-            if data.get("code") == 0:
-                page = data.get("data", {})
-                rows = page.get("rows", [])
-                sessions = []
-                for s in rows:
-                    sessions.append({
-                        "session_id": s.get("sessionId"),
-                        "title": s.get("sessionTitle"),
-                        "user_id": s.get("userId"),
-                        "last_message_time": s.get("lastMessageTime"),
-                        "status": s.get("status"),
-                    })
-                # 摘要包含会话标题列表，让 LLM 能直接描述
-                title_lines = []
-                for s in sessions:
-                    title_lines.append(
-                        f"  - [会话{s['session_id']}] {s['title']} "
-                        f"（最后消息: {s.get('last_message_time', '未知')}）"
-                    )
-                summary = (
-                    f"共 {page.get('total', 0)} 个聊天会话（当前页 {len(sessions)} 条）。\n"
-                    + "\n".join(title_lines)
-                )
-                return {
-                    "success": True,
-                    "summary": summary,
-                    "data": {"total": page.get("total"), "sessions": sessions},
-                    "error": None,
-                }
-            return {"success": False, "summary": f"查询失败: {data.get('msg')}", "data": None, "error": data.get("msg")}
-        except Exception as e:
-            return {"success": False, "summary": f"查询会话列表失败: {str(e)}", "data": None, "error": str(e)}
-
-
-class GetChatHistoryTool(BaseTool):
-    name = "get_chat_history"
-    description = (
-        "查询指定聊天会话的历史消息记录，返回用户和AI的对话内容及来源引用。"
-        "适用于用户询问'之前的对话内容'、'某个会话里讨论了什么'等问题。"
-    )
-
-    def parameters_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "integer",
-                    "description": "会话ID",
-                },
-            },
-            "required": ["session_id"],
-        }
-
-    async def run(self, **kwargs) -> Dict[str, Any]:
-        session_id = kwargs.get("session_id")
-        if not session_id:
-            return {"success": False, "summary": "缺少 session_id 参数", "data": None, "error": "missing session_id"}
-
-        # 清洗：从"会话7"中提取数字7，兼容 Planner 可能传入非纯数字的情况
-        if isinstance(session_id, str):
-            import re
-            nums = re.findall(r'\d+', session_id)
-            if nums:
-                session_id = int(nums[0])
-
-        try:
-            data = await _java_get(f"/ai/chat/agent/tools/chat-sessions/{session_id}/messages")
-            if data.get("code") == 0:
-                messages = data.get("data", [])
-                role_map = {1: "用户", 2: "AI"}
-                msgs = []
-                for m in messages:
-                    msgs.append({
-                        "message_id": m.get("messageId"),
-                        "role": m.get("messageRole"),
-                        "role_text": role_map.get(m.get("messageRole"), "未知"),
-                        "content": (m.get("messageContent") or "")[:300],
-                        "sources_count": len(m.get("sources") or []),
-                        "create_time": m.get("createTime"),
-                    })
-
-                # 对话摘要 + 内容预览
-                user_count = sum(1 for m in msgs if m["role"] == 1)
-                ai_count = sum(1 for m in msgs if m["role"] == 2)
-
-                preview_lines = []
-                for m in msgs[:10]:  # 最近10条
-                    role_label = m["role_text"]
-                    content_preview = m["content"][:120]
-                    preview_lines.append(f"  [{role_label}] {content_preview}")
-
-                summary = f"会话共 {len(msgs)} 条消息（用户{user_count}条，AI{ai_count}条）。"
-                if preview_lines:
-                    summary += "\n最近对话：\n" + "\n".join(preview_lines)
-
-                return {
-                    "success": True,
-                    "summary": summary,
-                    "data": {"session_id": session_id, "total": len(msgs), "messages": msgs},
-                    "error": None,
-                }
-            return {"success": False, "summary": f"查询失败: {data.get('msg')}", "data": None, "error": data.get("msg")}
-        except Exception as e:
-            return {"success": False, "summary": f"查询聊天历史失败: {str(e)}", "data": None, "error": str(e)}
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "summary": f"Failed to query KB mapping: {exc}",
+                "data": None,
+                "error": str(exc),
+            }

@@ -1,85 +1,75 @@
 """
-配置管理模块
-Package: top.modelx.rag
-Author: hua
+Application settings.
 """
-from pydantic_settings import BaseSettings
 from typing import List
 import os
 
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
-    # Application
     APP_NAME: str = "Enterprise RAG System"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     SECRET_KEY: str = "your-secret-key"
 
-    # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # Database
     DATABASE_URL: str = "mysql+pymysql://root:123456@localhost:3306/docbase_knowledge"
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
 
-    # LLM Provider
     LLM_PROVIDER: str = "deepseek"
     DEEPSEEK_API_KEY: str = "your_deepseek_api_key"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
 
-    # Embedding Provider
     EMBEDDING_PROVIDER: str = "huggingface"
-
-    # Ollama Embedding
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_EMBEDDING_MODEL: str = "qwen3-embedding:4b"
 
-    # HuggingFace Embedding
     HF_EMBEDDING_MODEL: str = "BAAI/bge-m3"
     HF_EMBEDDING_DEVICE: str = "cpu"
     HF_NORMALIZE_EMBEDDINGS: bool = True
     HF_LOCAL_FILES_ONLY: bool = True
 
-    # Vector Store
     CHROMA_PERSIST_DIR: str = "./chroma_db"
     CHROMA_COLLECTION_NAME: str = "rag_documents"
 
-    # File Upload
     UPLOAD_DIR: str = "./uploads"
-    MAX_FILE_SIZE: int = 104857600  # 100MB
+    MAX_FILE_SIZE: int = 104857600
     ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,xls,xlsx,jpg,jpeg,png,gif,bmp"
 
-    # RAG Config
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
-    TOP_K: int = 8                        # 向量召回数量
-    RERANK_TOP_K: int = 5                 # 重排后保留数量
-    RETRIEVAL_SCORE_THRESHOLD: float = 0.1 # 相似度最低阈值（过滤噪声）
-    MAX_CONTEXT_LENGTH: int = 6000        # 最大 context 字符数
+    # RAG
+    CHUNK_SIZE: int = 800
+    CHUNK_OVERLAP: int = 120
+    TOP_K: int = 8
+    RERANK_TOP_K: int = 5
+    RETRIEVAL_SCORE_THRESHOLD: float = 0.1
+    MAX_CONTEXT_LENGTH: int = 6000
 
-    # Cache
-    QUERY_CACHE_TTL: int = 300            # 查询缓存 TTL（秒）
-    QUERY_CACHE_MAX_SIZE: int = 500       # 最大缓存条数
-    EMBEDDING_CACHE_MAX_SIZE: int = 2000  # Embedding 缓存最大条数
+    # More permissive retrieval settings for single-document Q&A
+    DOC_FOCUSED_TOP_K: int = 12
+    DOC_FOCUSED_RERANK_TOP_K: int = 8
+    DOC_FOCUSED_SCORE_THRESHOLD: float = 0.03
 
-    # Async Worker
-    EMBEDDING_CONCURRENCY: int = 3        # 并发 embedding 数量
-    EMBED_BATCH_SIZE: int = 20            # 每批 embedding 文本数
+    QUERY_CACHE_TTL: int = 300
+    QUERY_CACHE_MAX_SIZE: int = 500
+    EMBEDDING_CACHE_MAX_SIZE: int = 2000
 
-    # Java Backend (for Agent tools)
+    EMBEDDING_CONCURRENCY: int = 3
+    EMBED_BATCH_SIZE: int = 20
+
     JAVA_BASE_URL: str = "http://localhost:8080"
     JAVA_API_KEY: str = ""
+    INTERNAL_API_KEY: str = ""
 
-    # Agent
-    AGENT_MAX_STEPS: int = 4              # Agent 最大执行步数
+    AGENT_MAX_STEPS: int = 4
 
-    # Logging
     LOG_DIR: str = "./logs"
-    LOG_RETRIEVAL: bool = True            # 开启检索日志
-    LOG_PROMPT: bool = True               # 开启 prompt 日志
+    LOG_RETRIEVAL: bool = True
+    LOG_PROMPT: bool = True
     LOG_LEVEL: str = "INFO"
 
     @property

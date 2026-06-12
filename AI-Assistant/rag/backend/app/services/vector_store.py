@@ -3,6 +3,7 @@ Vector store service based on ChromaDB.
 """
 import asyncio
 import os
+import re
 import time
 import uuid
 from typing import List, Optional, Tuple
@@ -20,7 +21,6 @@ from app.core.config import settings
 from app.services.cache import embedding_cache
 
 
-# Prefer local cached Hugging Face artifacts in this desktop setup.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
@@ -169,9 +169,56 @@ class VectorStoreService:
         return RecursiveCharacterTextSplitter(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
-            separators=["\n\n", "\n", "。", "，", "；", ".", "!", "?", ";", " ", ""],
+            separators=["\n\n", "\n", "。", "；", "：", "，", ".", "!", "?", ";", " ", ""],
             length_function=len,
         )
+
+    def _clean_text(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.replace("\u3000", " ")
+        text = re.sub(r"\r\n?", "\n", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def _looks_noisy_chunk(self, text: str) -> bool:
+        compact = text.strip()
+        if len(compact) < 40:
+            return True
+
+        lines = [line.strip() for line in compact.splitlines() if line.strip()]
+        if not lines:
+            return True
+
+        digit_ratio = sum(ch.isdigit() for ch in compact) / max(len(compact), 1)
+        punctuation_ratio = sum(
+            ch in "[](){}<>|/_-=:;,.'\"`~!@#$%^&*+"
+            for ch in compact
+        ) / max(len(compact), 1)
+
+        short_lines = sum(len(line) <= 3 for line in lines)
+        if short_lines >= max(5, len(lines) * 0.6):
+            return True
+        if digit_ratio > 0.35 and len(lines) >= 4:
+            return True
+        if punctuation_ratio > 0.28 and len(lines) >= 4:
+            return True
+        if re.search(r"(目录|目次|实验环境|课程编号|学号|页码)", compact) and len(compact) < 180:
+            return True
+        return False
+
+    def _prepare_chunks(self, documents: List[Document]) -> List[Document]:
+        splitter = self._text_splitter()
+        chunks = splitter.split_documents(documents)
+        prepared: List[Document] = []
+        for chunk in chunks:
+            cleaned = self._clean_text(chunk.page_content)
+            if not cleaned or self._looks_noisy_chunk(cleaned):
+                continue
+            chunk.page_content = cleaned
+            prepared.append(chunk)
+        return prepared
 
     async def add_documents_async(
         self,
@@ -180,11 +227,10 @@ class VectorStoreService:
         doc_id: int,
         filename: str,
     ) -> int:
-        splitter = self._text_splitter()
-        chunks = splitter.split_documents(documents)
+        chunks = self._prepare_chunks(documents)
 
         if not chunks:
-            logger.warning(f"No chunks for doc_id={doc_id} filename={filename}")
+            logger.warning(f"No usable chunks for doc_id={doc_id} filename={filename}")
             return 0
 
         for index, chunk in enumerate(chunks):
@@ -304,10 +350,6 @@ class VectorStoreService:
                     filtered.append((doc, similarity))
                 else:
                     filtered_out += 1
-                    logger.debug(
-                        f"[FILTER] score={score:.4f} sim={similarity:.4f} "
-                        f"< threshold={threshold}"
-                    )
 
             filtered.sort(key=lambda item: item[1], reverse=True)
             return filtered, filtered_out

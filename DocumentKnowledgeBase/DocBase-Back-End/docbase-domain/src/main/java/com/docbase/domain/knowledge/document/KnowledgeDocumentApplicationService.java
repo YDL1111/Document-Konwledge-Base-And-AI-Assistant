@@ -178,9 +178,10 @@ public class KnowledgeDocumentApplicationService {
     }
 
     public String getPreviewUrl(Long documentId, Long currentUserId, Long currentDeptId, boolean isAdmin) {
-        KnowledgeDocumentVersionEntity currentVersion =
-            getCurrentVersionEntity(documentId, currentUserId, currentDeptId, isAdmin);
-        return currentVersion.getStorageUrl();
+        // 权限校验
+        getCurrentVersionEntity(documentId, currentUserId, currentDeptId, isAdmin);
+        // 返回新的预览流端点，由 previewStream 根据文件类型设置正确的 Content-Type 和 charset
+        return "/knowledge/documents/" + documentId + "/preview/stream";
     }
 
     public ResponseEntity<byte[]> downloadCurrentDocument(Long documentId,
@@ -205,6 +206,71 @@ public class KnowledgeDocumentApplicationService {
         );
         headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
         return new ResponseEntity<>(FileUtil.readBytes(new File(filePath)), headers, HttpStatus.OK);
+    }
+
+    /**
+     * 文档预览：返回文件流，根据文件类型设置正确的 Content-Type 和 Content-Disposition: inline，
+     * 使得浏览器可以直接预览 PDF、TXT 等格式，而不是强制下载。
+     */
+    public ResponseEntity<byte[]> previewDocumentStream(Long documentId,
+                                                         Long currentUserId,
+                                                         Long currentDeptId,
+                                                         boolean isAdmin) {
+        KnowledgeDocumentVersionEntity currentVersion =
+            getCurrentVersionEntity(documentId, currentUserId, currentDeptId, isAdmin);
+
+        String storedFileName = FileNameUtil.getName(currentVersion.getStoragePath());
+        String filePath = FileUploadUtils.getFileAbsolutePath(UploadSubDir.DOCUMENT_PATH, storedFileName);
+        if (!FileUtil.exist(filePath)) {
+            throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, storedFileName, "文档文件");
+        }
+
+        String originalFileName = Objects.requireNonNullElse(currentVersion.getFileName(), storedFileName);
+        String fileExt = currentVersion.getFileExt();
+        if (fileExt != null) {
+            fileExt = fileExt.toLowerCase();
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        // Content-Disposition: inline 告诉浏览器尝试预览而非下载
+        String encodedFileName = cn.hutool.core.util.URLUtil.encode(originalFileName,
+                java.nio.charset.StandardCharsets.UTF_8);
+        headers.set("Content-Disposition", "inline;filename=\"" + encodedFileName + "\"");
+
+        // 根据文件扩展名设置正确的 Content-Type
+        MediaType mediaType = resolvePreviewMediaType(fileExt);
+        headers.setContentType(mediaType);
+
+        return new ResponseEntity<>(FileUtil.readBytes(new File(filePath)), headers, HttpStatus.OK);
+    }
+
+    /**
+     * 根据文件扩展名返回适合浏览器内联预览的 MediaType。
+     */
+    private MediaType resolvePreviewMediaType(String fileExt) {
+        if (fileExt == null) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        return switch (fileExt) {
+            case "pdf"  -> MediaType.APPLICATION_PDF;
+            case "txt", "log", "csv", "md", "java", "py", "xml", "json", "yaml", "yml",
+                 "properties", "sql", "html", "htm", "css", "js", "ts", "sh", "bat" ->
+                new MediaType("text", "plain", java.nio.charset.StandardCharsets.UTF_8);
+            case "png"  -> MediaType.IMAGE_PNG;
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "gif"  -> MediaType.IMAGE_GIF;
+            case "svg"  -> new MediaType("image", "svg+xml");
+            case "doc"  -> new MediaType("application", "msword");
+            case "docx" -> new MediaType("application",
+                    "vnd.openxmlformats-officedocument.wordprocessingml.document");
+            case "xls"  -> new MediaType("application", "vnd.ms-excel");
+            case "xlsx" -> new MediaType("application",
+                    "vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            case "ppt"  -> new MediaType("application", "vnd.ms-powerpoint");
+            case "pptx" -> new MediaType("application",
+                    "vnd.openxmlformats-officedocument.presentationml.presentation");
+            default     -> MediaType.APPLICATION_OCTET_STREAM;
+        };
     }
 
     private KnowledgeDocumentEntity getAccessibleDocument(Long documentId,

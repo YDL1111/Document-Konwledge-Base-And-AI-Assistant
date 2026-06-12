@@ -3,12 +3,17 @@ package com.docbase.admin.controller.ai;
 import com.docbase.common.core.base.BaseController;
 import com.docbase.common.core.dto.ResponseDTO;
 import com.docbase.common.core.page.PageDTO;
+import com.docbase.common.exception.ApiException;
+import com.docbase.common.exception.error.ErrorCode;
 import com.docbase.domain.ai.chat.AiChatApplicationService;
 import com.docbase.domain.ai.chat.dto.AiChatAnswerDTO;
 import com.docbase.domain.ai.chat.dto.AiChatMessageDTO;
 import com.docbase.domain.ai.chat.dto.AiChatQueryRequest;
 import com.docbase.domain.ai.chat.dto.AiChatSessionDTO;
 import com.docbase.domain.ai.chat.query.AiChatSessionQuery;
+import com.docbase.domain.knowledge.category.db.KnowledgeCategoryEntity;
+import com.docbase.domain.knowledge.category.db.KnowledgeCategoryService;
+import com.docbase.domain.knowledge.category.dto.KnowledgeCategoryDTO;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentEntity;
 import com.docbase.domain.knowledge.document.db.KnowledgeDocumentService;
 import com.docbase.domain.knowledge.document.dto.KnowledgeDocumentDTO;
@@ -23,8 +28,11 @@ import com.docbase.infrastructure.user.web.SystemLoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -47,6 +55,7 @@ public class AiChatController extends BaseController {
     private final AiChatApplicationService aiChatApplicationService;
     private final KnowledgeIngestTaskService knowledgeIngestTaskService;
     private final KnowledgeDocumentService knowledgeDocumentService;
+    private final KnowledgeCategoryService knowledgeCategoryService;
     private final KbMappingProperties kbMappingProperties;
 
     @Operation(summary = "List AI chat sessions")
@@ -61,7 +70,8 @@ public class AiChatController extends BaseController {
     @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseDTO<List<AiChatMessageDTO>> getMessages(@PathVariable Long sessionId) {
-        return ResponseDTO.ok(aiChatApplicationService.getMessages(sessionId));
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        return ResponseDTO.ok(aiChatApplicationService.getMessages(sessionId, loginUser));
     }
 
     @Operation(summary = "Delete AI chat session")
@@ -97,22 +107,28 @@ public class AiChatController extends BaseController {
     public SseEmitter agentStream(@RequestBody AiChatQueryRequest request,
                                    HttpServletResponse response) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        if (!loginUser.isAdmin()) {
+            throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
+        }
         return aiChatApplicationService.streamAgentQuery(request, loginUser, response);
     }
 
-    // ---- Agent 只读工具接口（供 Python Agent HTTP 调用，无需 @PreAuthorize） ----
+    // ---- Agent 只读工具接口（供 Python Agent HTTP 调用，权限与 ai:chat:list 对齐） ----
 
     @Operation(summary = "Agent: 查询导入任务列表")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/ingest-tasks")
     public ResponseDTO<PageDTO<KnowledgeIngestTaskDTO>> agentListIngestTasks(
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize,
-            @RequestParam(required = false) Integer status) {
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Long documentId) {
 
         KnowledgeIngestTaskQuery query = new KnowledgeIngestTaskQuery();
         query.setPageNum(pageNum);
         query.setPageSize(pageSize);
         query.setStatus(status);
+        query.setDocumentId(documentId);
 
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<KnowledgeIngestTaskEntity> page =
                 knowledgeIngestTaskService.page(query.toPage(), query.toQueryWrapper());
@@ -125,6 +141,7 @@ public class AiChatController extends BaseController {
     }
 
     @Operation(summary = "Agent: 查询导入任务详情")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/ingest-task/{taskId}")
     public ResponseDTO<KnowledgeIngestTaskDTO> agentGetIngestTaskDetail(@PathVariable Long taskId) {
         KnowledgeIngestTaskEntity entity = knowledgeIngestTaskService.getById(taskId);
@@ -135,6 +152,7 @@ public class AiChatController extends BaseController {
     }
 
     @Operation(summary = "Agent: 查询文档详情")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/document/{documentId}")
     public ResponseDTO<KnowledgeDocumentDTO> agentGetDocumentDetail(@PathVariable Long documentId) {
         KnowledgeDocumentEntity entity = knowledgeDocumentService.getById(documentId);
@@ -145,6 +163,7 @@ public class AiChatController extends BaseController {
     }
 
     @Operation(summary = "Agent: 按分类查询文档列表")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/documents")
     public ResponseDTO<PageDTO<KnowledgeDocumentDTO>> agentListDocuments(
             @RequestParam(defaultValue = "1") Integer pageNum,
@@ -156,7 +175,7 @@ public class AiChatController extends BaseController {
         query.setPageNum(pageNum);
         query.setPageSize(pageSize);
         if (categoryId != null) {
-            query.setCategoryId(categoryId);
+            query.setCategoryIdList(collectCategoryTreeIds(categoryId));
         }
         if (status != null) {
             query.setStatus(status);
@@ -172,7 +191,25 @@ public class AiChatController extends BaseController {
         return ResponseDTO.ok(new PageDTO<>(records, page.getTotal()));
     }
 
+    @Operation(summary = "Agent: 查询分类及其直接子分类")
+    @PreAuthorize("@permission.has('ai:chat:list')")
+    @GetMapping("/agent/tools/categories")
+    public ResponseDTO<List<KnowledgeCategoryDTO>> agentListCategories(
+            @RequestParam(required = false) Long parentId) {
+        Long actualParentId = parentId == null ? 0L : parentId;
+        List<KnowledgeCategoryDTO> records = knowledgeCategoryService.lambdaQuery()
+                .eq(KnowledgeCategoryEntity::getParentId, actualParentId)
+                .orderByAsc(KnowledgeCategoryEntity::getSortNum)
+                .orderByDesc(KnowledgeCategoryEntity::getCreateTime)
+                .list()
+                .stream()
+                .map(KnowledgeCategoryDTO::new)
+                .collect(Collectors.toList());
+        return ResponseDTO.ok(records);
+    }
+
     @Operation(summary = "Agent: 查询分类与知识库的映射关系")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/kb-mapping")
     public ResponseDTO<Map<String, Object>> agentGetKbMapping() {
         Map<String, Object> result = new java.util.LinkedHashMap<>();
@@ -182,6 +219,7 @@ public class AiChatController extends BaseController {
     }
 
     @Operation(summary = "Agent: 查询聊天会话列表")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/chat-sessions")
     public ResponseDTO<PageDTO<AiChatSessionDTO>> agentListChatSessions(
             @RequestParam(defaultValue = "1") Integer pageNum,
@@ -190,14 +228,17 @@ public class AiChatController extends BaseController {
         AiChatSessionQuery query = new AiChatSessionQuery();
         query.setPageNum(pageNum);
         query.setPageSize(pageSize);
+        restrictToCurrentUserIfNeeded(query);
 
         return ResponseDTO.ok(aiChatApplicationService.getSessionList(query));
     }
 
     @Operation(summary = "Agent: 查询聊天会话历史消息")
+    @PreAuthorize("@permission.has('ai:chat:list')")
     @GetMapping("/agent/tools/chat-sessions/{sessionId}/messages")
     public ResponseDTO<List<AiChatMessageDTO>> agentGetChatMessages(@PathVariable Long sessionId) {
-        List<AiChatMessageDTO> messages = aiChatApplicationService.getMessages(sessionId);
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        List<AiChatMessageDTO> messages = aiChatApplicationService.getMessages(sessionId, loginUser);
         return ResponseDTO.ok(messages);
     }
 
@@ -208,5 +249,35 @@ public class AiChatController extends BaseController {
         if (!loginUser.isAdmin()) {
             query.setUserId(loginUser.getUserId());
         }
+    }
+
+    private List<Long> collectCategoryTreeIds(Long rootCategoryId) {
+        Set<Long> result = new LinkedHashSet<>();
+        result.add(rootCategoryId);
+
+        List<KnowledgeCategoryEntity> allCategories = knowledgeCategoryService.lambdaQuery()
+                .select(
+                        KnowledgeCategoryEntity::getCategoryId,
+                        KnowledgeCategoryEntity::getParentId,
+                        KnowledgeCategoryEntity::getAncestors
+                )
+                .list();
+
+        for (KnowledgeCategoryEntity category : allCategories) {
+            String ancestors = category.getAncestors();
+            if (ancestors == null || ancestors.isBlank()) {
+                continue;
+            }
+            for (String part : ancestors.split(",")) {
+                if (part.isBlank()) {
+                    continue;
+                }
+                if (Long.toString(rootCategoryId).equals(part.trim())) {
+                    result.add(category.getCategoryId());
+                    break;
+                }
+            }
+        }
+        return new ArrayList<>(result);
     }
 }

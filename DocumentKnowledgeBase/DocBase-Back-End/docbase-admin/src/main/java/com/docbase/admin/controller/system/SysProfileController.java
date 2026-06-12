@@ -19,6 +19,7 @@ import com.docbase.common.enums.common.BusinessTypeEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -45,6 +46,7 @@ public class SysProfileController extends BaseController {
      * 个人信息
      */
     @Operation(summary = "获取个人信息")
+    @PreAuthorize("isAuthenticated()")
     @GetMapping
     public ResponseDTO<UserProfileDTO> profile() {
         SystemLoginUser user = AuthenticationUtils.getSystemLoginUser();
@@ -56,6 +58,7 @@ public class SysProfileController extends BaseController {
      * 修改用户
      */
     @Operation(summary = "修改个人信息")
+    @PreAuthorize("isAuthenticated()")
     @AccessLog(title = "个人信息", businessType = BusinessTypeEnum.MODIFY)
     @PutMapping
     public ResponseDTO<Void> updateProfile(@RequestBody UpdateProfileCommand command) {
@@ -69,6 +72,7 @@ public class SysProfileController extends BaseController {
      * 重置密码
      */
     @Operation(summary = "重置个人密码")
+    @PreAuthorize("isAuthenticated()")
     @AccessLog(title = "个人信息", businessType = BusinessTypeEnum.MODIFY)
     @PutMapping("/password")
     public ResponseDTO<Void> updatePassword(@RequestBody UpdateUserPasswordCommand command) {
@@ -82,6 +86,7 @@ public class SysProfileController extends BaseController {
      * 头像上传
      */
     @Operation(summary = "修改个人头像")
+    @PreAuthorize("isAuthenticated()")
     @AccessLog(title = "用户头像", businessType = BusinessTypeEnum.MODIFY)
     @PostMapping("/avatar")
     public ResponseDTO<UploadFileDTO> avatar(@RequestParam("avatarfile") MultipartFile file) {

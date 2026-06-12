@@ -66,6 +66,7 @@ public class SysDeptController extends BaseController {
      * 获取部门下拉树列表
      */
     @Operation(summary = "获取部门树级结构")
+    @PreAuthorize("@permission.has('system:dept:list')")
     @GetMapping("/depts/dropdown")
     public ResponseDTO<List<Tree<Long>>> dropdownList() {
         List<Tree<Long>> deptTree = deptApplicationService.getDeptTree();

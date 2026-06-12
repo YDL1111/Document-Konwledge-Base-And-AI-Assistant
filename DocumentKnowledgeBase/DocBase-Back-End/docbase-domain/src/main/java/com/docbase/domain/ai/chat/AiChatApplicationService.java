@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -74,7 +75,16 @@ public class AiChatApplicationService {
         return new PageDTO<>(records, page.getTotal());
     }
 
-    public List<AiChatMessageDTO> getMessages(Long sessionId) {
+    public List<AiChatMessageDTO> getMessages(Long sessionId, SystemLoginUser loginUser) {
+        // 🔒 校验会话归属：非管理员只能读取自己的会话消息
+        AiChatSessionEntity session = aiChatSessionService.getById(sessionId);
+        if (session == null) {
+            return Collections.emptyList();
+        }
+        if (!loginUser.isAdmin() && !Objects.equals(session.getUserId(), loginUser.getUserId())) {
+            throw new IllegalArgumentException("You do not have permission to view this session");
+        }
+
         List<AiChatMessageEntity> entities = aiChatMessageService.lambdaQuery()
                 .eq(AiChatMessageEntity::getSessionId, sessionId)
                 .orderByAsc(AiChatMessageEntity::getCreateTime)
@@ -209,7 +219,7 @@ public class AiChatApplicationService {
 
     private List<Integer> resolveVisiblePythonDocIds(AiChatQueryRequest request, Integer kbId,
                                                      SystemLoginUser loginUser) {
-        List<KnowledgeDocumentEntity> candidateDocs = loadCandidateDocuments(request, kbId);
+        List<KnowledgeDocumentEntity> candidateDocs = loadCandidateDocuments(request, kbId, loginUser);
         if (candidateDocs.isEmpty()) {
             return Collections.emptyList();
         }
@@ -220,6 +230,17 @@ public class AiChatApplicationService {
                 .collect(Collectors.toList());
         if (visibleDocumentIds.isEmpty()) {
             return Collections.emptyList();
+        }
+
+        if (request.getDocumentId() == null) {
+            Long inferredDocumentId = inferDocumentIdFromQuestion(candidateDocs, loginUser, request.getQuestion());
+            if (inferredDocumentId != null) {
+                visibleDocumentIds = visibleDocumentIds.stream()
+                        .filter(documentId -> Objects.equals(documentId, inferredDocumentId))
+                        .collect(Collectors.toList());
+                log.info("AI query auto scoped to documentId={} by question match: question={}",
+                        inferredDocumentId, request.getQuestion());
+            }
         }
 
         return knowledgeIngestTaskService.list(
@@ -243,25 +264,180 @@ public class AiChatApplicationService {
                         map -> new ArrayList<>(new HashSet<>(map.values()))));
     }
 
-    private List<KnowledgeDocumentEntity> loadCandidateDocuments(AiChatQueryRequest request, Integer kbId) {
+    private Long inferDocumentIdFromQuestion(List<KnowledgeDocumentEntity> candidateDocs,
+                                             SystemLoginUser loginUser,
+                                             String question) {
+        if (question == null || question.isBlank()) {
+            return null;
+        }
+
+        String normalizedQuestion = normalizeForMatch(question);
+        if (normalizedQuestion.isBlank()) {
+            return null;
+        }
+
+        List<KnowledgeDocumentEntity> visibleDocs = candidateDocs.stream()
+                .filter(doc -> canCurrentUserView(doc, loginUser))
+                .collect(Collectors.toList());
+
+        List<KnowledgeDocumentEntity> strongMatches = visibleDocs.stream()
+                .filter(doc -> {
+                    String title = normalizeForMatch(doc.getTitle());
+                    return !title.isBlank() && normalizedQuestion.contains(title);
+                })
+                .collect(Collectors.toList());
+        if (strongMatches.size() == 1) {
+            return strongMatches.get(0).getDocumentId();
+        }
+
+        KnowledgeDocumentEntity bestDoc = null;
+        int bestScore = 0;
+        boolean tie = false;
+        for (KnowledgeDocumentEntity doc : visibleDocs) {
+            int score = matchScore(normalizedQuestion, doc);
+            if (score <= 0) {
+                continue;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestDoc = doc;
+                tie = false;
+            } else if (score == bestScore) {
+                tie = true;
+            }
+        }
+
+        if (!tie && bestDoc != null && bestScore >= 2) {
+            return bestDoc.getDocumentId();
+        }
+        return null;
+    }
+
+    private int matchScore(String normalizedQuestion, KnowledgeDocumentEntity doc) {
+        String title = normalizeForMatch(doc.getTitle());
+        if (title.isBlank()) {
+            return 0;
+        }
+
+        int score = 0;
+        if (normalizedQuestion.contains(title)) {
+            score += 10;
+        }
+
+        for (String token : splitMatchTokens(title)) {
+            if (token.length() >= 2 && normalizedQuestion.contains(token)) {
+                score += 1;
+            }
+        }
+
+        String summary = normalizeForMatch(doc.getSummary());
+        if (!summary.isBlank()) {
+            for (String token : splitMatchTokens(summary)) {
+                if (token.length() >= 2 && normalizedQuestion.contains(token)) {
+                    score += 1;
+                }
+            }
+        }
+        return score;
+    }
+
+    private List<String> splitMatchTokens(String text) {
+        if (text == null || text.isBlank()) {
+            return Collections.emptyList();
+        }
+        return List.of(text.split("\\s+")).stream()
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .collect(Collectors.toList());
+    }
+
+    private String normalizeForMatch(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        return text.toLowerCase(Locale.ROOT)
+                .replaceAll("\\.(pdf|doc|docx|txt)$", " ")
+                .replaceAll("[^\\p{IsHan}a-z0-9]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private List<KnowledgeDocumentEntity> loadCandidateDocuments(AiChatQueryRequest request,
+                                                                 Integer kbId,
+                                                                 SystemLoginUser loginUser) {
         if (request.getDocumentId() != null) {
             KnowledgeDocumentEntity doc = knowledgeDocumentService.getById(request.getDocumentId());
             return doc == null ? Collections.emptyList() : List.of(doc);
         }
 
-        Set<Long> categoryIds = kbMappingProperties.getCategoryMappings().entrySet().stream()
-                .filter(entry -> Objects.equals(entry.getValue(), kbId))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
+        List<Long> importedDocumentIds = knowledgeIngestTaskService.list(
+                        new LambdaQueryWrapper<KnowledgeIngestTaskEntity>()
+                                .eq(KnowledgeIngestTaskEntity::getStatus,
+                                        KnowledgeIngestTaskApplicationService.STATUS_SUCCESS)
+                                .ne(KnowledgeIngestTaskEntity::getTaskType,
+                                        KnowledgeIngestTaskApplicationService.TASK_TYPE_DELETE)
+                                .eq(KnowledgeIngestTaskEntity::getPythonKbId, kbId)
+                                .isNotNull(KnowledgeIngestTaskEntity::getPythonDocId)
+                                .orderByDesc(KnowledgeIngestTaskEntity::getFinishedTime)
+                                .orderByDesc(KnowledgeIngestTaskEntity::getTaskId))
+                .stream()
+                .map(KnowledgeIngestTaskEntity::getDocumentId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (importedDocumentIds.isEmpty()) {
+            log.warn("No successfully imported documents found for kbId={}", kbId);
+            return Collections.emptyList();
+        }
 
         LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(KnowledgeDocumentEntity::getStatus, KnowledgeDocumentConstant.Status.PUBLISHED);
+        wrapper.eq(KnowledgeDocumentEntity::getStatus, KnowledgeDocumentConstant.Status.PUBLISHED)
+                .in(KnowledgeDocumentEntity::getDocumentId, importedDocumentIds);
         if (request.getCategoryId() != null) {
             wrapper.eq(KnowledgeDocumentEntity::getCategoryId, request.getCategoryId());
-        } else if (!categoryIds.isEmpty()) {
-            wrapper.in(KnowledgeDocumentEntity::getCategoryId, categoryIds);
+        }
+        if (!loginUser.isAdmin()) {
+            List<Long> accessibleDeptIds = accessibleDeptIds(loginUser);
+            wrapper.and(visibleWrapper -> visibleWrapper
+                    .eq(KnowledgeDocumentEntity::getCreatorId, loginUser.getUserId())
+                    .or(sharedWrapper -> sharedWrapper
+                            .eq(KnowledgeDocumentEntity::getStatus, KnowledgeDocumentConstant.Status.PUBLISHED)
+                            .eq(KnowledgeDocumentEntity::getVisibility, KnowledgeDocumentConstant.Visibility.PUBLIC))
+                    .or(sharedWrapper -> {
+                        sharedWrapper.eq(KnowledgeDocumentEntity::getStatus, KnowledgeDocumentConstant.Status.PUBLISHED)
+                                .eq(KnowledgeDocumentEntity::getVisibility, KnowledgeDocumentConstant.Visibility.DEPT);
+                        if (accessibleDeptIds.isEmpty()) {
+                            sharedWrapper.isNull(KnowledgeDocumentEntity::getDeptId);
+                        } else {
+                            sharedWrapper.in(KnowledgeDocumentEntity::getDeptId, accessibleDeptIds);
+                        }
+                    }));
         }
         return knowledgeDocumentService.list(wrapper);
+    }
+
+    private List<Long> accessibleDeptIds(SystemLoginUser loginUser) {
+        if (loginUser == null || loginUser.getRoleInfo() == null) {
+            return loginUser != null && loginUser.getDeptId() != null
+                    ? List.of(loginUser.getDeptId())
+                    : Collections.emptyList();
+        }
+
+        DataScopeEnum scope = loginUser.getRoleInfo().getDataScope();
+        return switch (scope) {
+            case ALL -> Collections.emptyList();
+            case CUSTOM_DEFINE -> {
+                Set<Long> deptIdSet = loginUser.getRoleInfo().getDeptIdSet();
+                yield deptIdSet != null ? new ArrayList<>(deptIdSet) : Collections.emptyList();
+            }
+            case SINGLE_DEPT, ONLY_SELF -> loginUser.getDeptId() != null
+                    ? List.of(loginUser.getDeptId())
+                    : Collections.emptyList();
+            case DEPT_TREE -> loginUser.getDeptId() != null
+                    ? sysDeptService.getDeptAndChildrenIds(loginUser.getDeptId())
+                    : Collections.emptyList();
+        };
     }
 
     private boolean canCurrentUserView(KnowledgeDocumentEntity doc, SystemLoginUser loginUser) {
@@ -342,6 +518,10 @@ public class AiChatApplicationService {
         if (request.getSessionId() != null) {
             AiChatSessionEntity session = aiChatSessionService.getById(request.getSessionId());
             if (session != null) {
+                // 🔒 校验会话归属：非管理员不能继续他人的会话
+                if (!loginUser.isAdmin() && !Objects.equals(session.getUserId(), loginUser.getUserId())) {
+                    throw new IllegalArgumentException("You do not have permission to continue this session");
+                }
                 return session;
             }
         }

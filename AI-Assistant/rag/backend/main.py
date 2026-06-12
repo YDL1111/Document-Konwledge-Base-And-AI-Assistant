@@ -13,6 +13,7 @@ from app.api import chat, document, kb, system
 from app.core.config import settings
 from app.core.database import init_db
 from app.services.retrieval_log import setup_rag_loggers
+from app.utils.auth import ApiKeyMiddleware
 
 
 logger.remove()
@@ -52,13 +53,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 🔒 CORS: 仅允许 Java 后端（本地开发 + 生产环境按需配置）
+_allowed_origins = [
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 🔒 API Key 认证中间件（校验 X-API-Key 请求头）
+app.add_middleware(ApiKeyMiddleware)
 
 
 @app.exception_handler(Exception)

@@ -70,6 +70,7 @@ public class SysMenuController extends BaseController {
      * 获取菜单下拉树列表
      */
     @Operation(summary = "菜单列表（树级）", description = "菜单树级下拉框")
+    @PreAuthorize("@permission.has('system:menu:list')")
     @GetMapping("/dropdown")
     public ResponseDTO<List<Tree<Long>>> dropdownList() {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();

@@ -60,7 +60,7 @@ const dialogMode = ref<"add" | "edit">("add");
 const editingDocumentId = ref<number>();
 
 const canAudit = computed(() => hasAuth("knowledge:document:audit"));
-const canAdd = computed(() => hasAuth("knowledge:document:add"));
+const canAdd = computed(() => hasAuth("knowledge:document:upload"));
 const canEdit = computed(() => hasAuth("knowledge:document:edit"));
 const canRemove = computed(() => hasAuth("knowledge:document:remove"));
 const canIngest = computed(() => hasAuth("knowledge:document:ingest"));
@@ -571,7 +571,7 @@ onMounted(() => {
               审核
             </el-button>
             <el-button
-              v-if="canIngest && row.status === 3 && !row.hasAiImport"
+              v-if="canIngest && row.status === 3"
               link
               type="warning"
               :loading="importingDocId === row.documentId"

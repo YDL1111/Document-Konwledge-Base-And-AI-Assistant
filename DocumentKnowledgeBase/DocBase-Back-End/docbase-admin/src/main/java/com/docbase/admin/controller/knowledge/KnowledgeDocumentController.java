@@ -78,6 +78,19 @@ public class KnowledgeDocumentController extends BaseController {
         );
     }
 
+    @Operation(summary = "文档预览文件流（浏览器内联预览）")
+    @PreAuthorize("@permission.has('knowledge:document:preview')")
+    @GetMapping("/{documentId}/preview/stream")
+    public ResponseEntity<byte[]> previewStream(@PathVariable Long documentId) {
+        SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
+        return knowledgeDocumentApplicationService.previewDocumentStream(
+            documentId,
+            loginUser.getUserId(),
+            loginUser.getDeptId(),
+            loginUser.isAdmin()
+        );
+    }
+
     @Operation(summary = "下载当前文档")
     @PreAuthorize("@permission.has('knowledge:document:download')")
     @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.EXPORT)
@@ -93,7 +106,7 @@ public class KnowledgeDocumentController extends BaseController {
     }
 
     @Operation(summary = "新增文档")
-    @PreAuthorize("@permission.has('knowledge:document:add')")
+    @PreAuthorize("@permission.has('knowledge:document:upload')")
     @AccessLog(title = "知识库文档", businessType = BusinessTypeEnum.ADD)
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseDTO<Void> add(@Valid KnowledgeDocumentAddCommand addCommand,

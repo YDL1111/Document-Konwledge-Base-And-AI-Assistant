@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { ChatDotRound, Delete, MagicStick, Plus, Promotion } from "@element-plus/icons-vue";
 import {
@@ -17,6 +17,7 @@ import type {
   SourceInfo
 } from "@/api/ai/types";
 import { formatToken, getToken } from "@/utils/auth";
+import { useUserStoreHook } from "@/store/modules/user";
 
 defineOptions({
   name: "AiChat"
@@ -61,6 +62,18 @@ const pageHeight = ref("calc(100vh - 96px)");
 
 // Agent mode
 const agentMode = ref(false);
+const userStore = useUserStoreHook();
+const canUseAgent = computed(() => userStore.roles.includes("admin"));
+
+watch(
+  canUseAgent,
+  value => {
+    if (!value) {
+      agentMode.value = false;
+    }
+  },
+  { immediate: true }
+);
 
 let currentAbortController: AbortController | null = null;
 let streamSessionListSynced = false;
@@ -457,7 +470,7 @@ const handleStreamEvent = async (event: StreamEvent, aiMsg: ChatMessage, isNewSe
   switch (event.type) {
     case "start":
       // Agent mode: 初始化该消息的 trace
-      if (agentMode.value) {
+      if (agentMode.value && canUseAgent.value) {
         aiMsg.agentTrace = [];
       }
       break;
@@ -558,7 +571,8 @@ const streamAnswer = async (payload: AiChatQueryRequest, aiMsg: ChatMessage, isN
   const token = getToken();
   currentAbortController = new AbortController();
 
-  const streamUrl = agentMode.value ? getAiChatAgentStreamUrl() : getAiChatStreamUrl();
+  const useAgentMode = agentMode.value && canUseAgent.value;
+  const streamUrl = useAgentMode ? getAiChatAgentStreamUrl() : getAiChatStreamUrl();
   const response = await fetch(`${import.meta.env.VITE_APP_BASE_API}${streamUrl}`, {
     method: "POST",
     headers: {
@@ -900,6 +914,7 @@ onBeforeUnmount(() => {
             <div class="composer-toolbar-left">
               <span class="composer-tag">Stream response</span>
               <el-switch
+                v-if="canUseAgent"
                 v-model="agentMode"
                 size="small"
                 inline-prompt

@@ -48,6 +48,7 @@ public class SecurityConfig {
     private final TokenService tokenService;
     private final RedisCacheService redisCache;
     private final JwtAuthenticationTokenFilter jwtTokenFilter;
+    private final ApiKeyAuthFilter apiKeyAuthFilter;
     private final UserDetailsService userDetailsService;
     private final CorsFilter corsFilter;
 
@@ -97,8 +98,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                // Agent 只读工具接口：供 Python 后端通过 HTTP 调用，无需登录态
-                .requestMatchers("/ai/chat/agent/tools/**").permitAll()
+                // Agent 只读工具接口：通过 X-API-Key 头部认证（ApiKeyAuthFilter），不再公开暴露
+                .requestMatchers("/ai/chat/agent/tools/**").authenticated()
                 .requestMatchers("/login", "/register", "/getConfig", "/captchaImage", "/api/**").anonymous()
                 .requestMatchers(HttpMethod.GET, "/", "/*.html", "/**/*.html", "/**/*.css", "/**/*.js",
                     "/profile/avatar/**", "/profile/document/**").permitAll()
@@ -118,7 +119,10 @@ public class SecurityConfig {
             .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.disable()));
 
         httpSecurity.logout().logoutUrl("/logout").logoutSuccessHandler(logOutSuccessHandler());
+        // jwtTokenFilter 必须先注册，后续 filter 才能引用 JwtAuthenticationTokenFilter.class
         httpSecurity.addFilterBefore(jwtTokenFilter, UsernamePasswordAuthenticationFilter.class);
+        // API Key 过滤器在 JWT 之前：携带合法 X-API-Key 的请求直接完成认证，跳过 JWT 解析
+        httpSecurity.addFilterBefore(apiKeyAuthFilter, JwtAuthenticationTokenFilter.class);
         httpSecurity.addFilterBefore(corsFilter, JwtAuthenticationTokenFilter.class);
         httpSecurity.addFilterBefore(corsFilter, LogoutFilter.class);
 

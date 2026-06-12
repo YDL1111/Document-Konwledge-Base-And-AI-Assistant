@@ -18,10 +18,9 @@ from app.agent.tools import (
     ListIngestTasksTool,
     GetIngestTaskDetailTool,
     GetDocumentDetailTool,
+    ListCategoriesTool,
     ListDocumentsByCategoryTool,
     GetKbMappingInfoTool,
-    ListChatSessionsTool,
-    GetChatHistoryTool,
 )
 from app.core.config import settings
 from loguru import logger
@@ -34,9 +33,8 @@ _agent_executor = AgentExecutor(
         GetIngestTaskDetailTool(),
         GetDocumentDetailTool(),
         ListDocumentsByCategoryTool(),
+        ListCategoriesTool(),
         GetKbMappingInfoTool(),
-        ListChatSessionsTool(),
-        GetChatHistoryTool(),
     ]
 )
 

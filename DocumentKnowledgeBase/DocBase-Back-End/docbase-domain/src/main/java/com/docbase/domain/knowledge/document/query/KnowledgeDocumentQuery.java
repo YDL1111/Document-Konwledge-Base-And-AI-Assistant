@@ -21,6 +21,7 @@ public class KnowledgeDocumentQuery extends AbstractPageQuery<KnowledgeDocumentE
     private Long deptId;
     private Boolean onlyVisibleToCurrentUser;
     private Boolean includePublishedShared;
+    private List<Long> categoryIdList;
     private List<Long> deptIdList;
 
     @Override
@@ -28,6 +29,7 @@ public class KnowledgeDocumentQuery extends AbstractPageQuery<KnowledgeDocumentE
         QueryWrapper<KnowledgeDocumentEntity> queryWrapper = new QueryWrapper<KnowledgeDocumentEntity>()
             .like(StrUtil.isNotBlank(title), "title", title)
             .eq(categoryId != null, "category_id", categoryId)
+            .in(CollUtil.isNotEmpty(categoryIdList), "category_id", categoryIdList)
             .eq(status != null, "status", status)
             .eq(visibility != null, "visibility", visibility)
             .orderByDesc("update_time");

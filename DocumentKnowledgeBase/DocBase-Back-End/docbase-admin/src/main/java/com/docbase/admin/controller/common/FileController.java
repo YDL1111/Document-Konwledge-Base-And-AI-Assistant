@@ -22,6 +22,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,6 +46,7 @@ public class FileController {
      * @param fileName 文件名称
      */
     @Operation(summary = "下载文件")
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/download")
     public ResponseEntity<byte[]> fileDownload(String fileName, HttpServletResponse response) {
         try {
@@ -71,6 +73,7 @@ public class FileController {
      * 通用上传请求（单个）
      */
     @Operation(summary = "单个上传文件")
+    @PreAuthorize("isAuthenticated()")
     @PostMapping("/upload")
     public ResponseDTO<UploadDTO> uploadFile(MultipartFile file) {
         if (file == null) {
@@ -99,6 +102,7 @@ public class FileController {
      * 通用上传请求（多个）
      */
     @Operation(summary = "多个上传文件")
+    @PreAuthorize("isAuthenticated()")
     @PostMapping("/uploads")
     public ResponseDTO<List<UploadDTO>> uploadFiles(List<MultipartFile> files) {
         if (CollUtil.isEmpty(files)) {

@@ -106,11 +106,18 @@ docbase:
     ai:
         python:
             base-url: http://localhost:8000
-            api-key:
+            # 🔒 内部服务 API Key：Python 后端调用 Java Agent 工具接口时通过 X-API-Key 头传递
+            # 生产环境必须设置为强随机字符串，且与 Python 端 JAVA_API_KEY 一致
+            # 为空时 ApiKeyAuthFilter 自动跳过（仅开发环境可用）
+            api-key: docbase-agent-dev-key-20260612
             connect-timeout-ms: 3000
             read-timeout-ms: 120000
         kb-mapping:
             default-kb-id: 5
             category-mappings:
                 1: 5    # Study
+                2: 5    # AI / Report
+                6: 5    # Project Acceptance
+                8: 5    # Software Engineering Program
                 9: 5    # Java
+                10: 5   # Linux

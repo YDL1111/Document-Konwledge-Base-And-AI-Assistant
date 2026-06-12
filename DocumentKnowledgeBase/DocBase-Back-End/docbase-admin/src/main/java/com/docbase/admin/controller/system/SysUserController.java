@@ -86,6 +86,7 @@ public class SysUserController extends BaseController {
      * 下载批量导入模板
      */
     @Operation(summary = "用户导入excel下载")
+    @PreAuthorize("@permission.has('system:user:import')")
     @GetMapping("/excelTemplate")
     public void downloadExcelTemplate(HttpServletResponse response) {
         CustomExcelUtil.writeToResponse(ListUtil.toList(new AddUserCommand()), AddUserCommand.class, response);

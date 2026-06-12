@@ -159,17 +159,25 @@ D:\ResumeProjects
 
 ### 场景 3：轻量 Agent
 
-1. 用户在前端打开 Agent 模式。
+1. 管理员用户在前端打开 Agent 模式，普通用户当前仅使用标准 AI 问答模式。
 2. 前端请求 Java `/ai/chat/agent/stream`。
 3. Java 保存会话并转发给 Python Agent 接口。
 4. Python 由 Planner 决策是否调用工具。
 5. Python 可调用：
-   - 本地知识库检索工具
-   - Java 提供的只读业务工具接口
+   - `search_kb`：本地知识库检索，支持按业务文档定向召回
+   - `list_ingest_tasks`：查询导入任务列表
+   - `get_ingest_task_detail`：查询单个导入任务详情
+   - `get_document_detail`：查询知识文档详情
+   - `list_documents_by_category`：按分类查询文档列表
+   - `get_kb_mapping_info`：查询业务分类与 Python 知识库映射关系
 6. 前端展示最终回答和执行轨迹。
 
 这个链路的重点是：  
 `Agent 逻辑仍然在 Python，但业务上下文和数据根基仍然在 Java。`
+
+补充说明：  
+- 当前 Agent 能力仅对管理员用户开放，Java 端会校验管理员身份后才允许进入 `/ai/chat/agent/stream`。
+- Agent 侧工具以只读能力为主，避免在第一阶段引入高风险业务写操作。
 
 ---
 
