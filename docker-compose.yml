@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: docbase-mysql
+    restart: always
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: docbase_knowledge
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_general_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./DocumentKnowledgeBase/DocBase-Back-End/sql:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=caching_sha2_password --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    networks:
+      - docbase-network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: docbase-redis
+    restart: always
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - docbase-network
+
+  # Java 后端 (DocBase)
+  docbase-backend:
+    build:
+      context: ./DocumentKnowledgeBase/DocBase-Back-End
+      dockerfile: Dockerfile
+    container_name: docbase-backend
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: basic,docker
+    volumes:
+      - docbase_files:/app/docbase-files
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - docbase-network
+
+  # Vue 前端 (DocBase)
+  docbase-frontend:
+    build:
+      context: ./DocumentKnowledgeBase/DocBase-Front-End
+      dockerfile: Dockerfile
+    container_name: docbase-frontend
+    restart: always
+    ports:
+      - "3080:80"
+    depends_on:
+      - docbase-backend
+    networks:
+      - docbase-network
+
+  # Python RAG 后端
+  python-rag-backend:
+    build:
+      context: ./AI-Assistant/rag/backend
+      dockerfile: Dockerfile
+    container_name: python-rag-backend
+    restart: always
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: mysql+pymysql://root:123456@mysql:3306/docbase_knowledge
+      JAVA_API_BASE_URL: http://docbase-backend:8080
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-replace_with_your_deepseek_api_key}
+      JAVA_API_KEY: ${DOCBASE_INTERNAL_API_KEY:-docbase-agent-dev-key}
+      INTERNAL_API_KEY: ${DOCBASE_INTERNAL_API_KEY:-docbase-agent-dev-key}
+    volumes:
+      - rag_uploads:/app/uploads
+      - rag_chroma_db:/app/chroma_db
+      - rag_logs:/app/logs
+      - C:/Users/15567/.cache/huggingface:/root/.cache/huggingface:ro
+    depends_on:
+      - mysql
+      - docbase-backend
+    networks:
+      - docbase-network
+
+  # RAG 前端
+  rag-frontend:
+    build:
+      context: ./AI-Assistant/rag/frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    restart: always
+    ports:
+      - "3001:80"
+    depends_on:
+      - python-rag-backend
+    networks:
+      - docbase-network
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  docbase_files:
+    driver: local
+  rag_uploads:
+    driver: local
+  rag_chroma_db:
+    driver: local
+  rag_logs:
+    driver: local
+
+networks:
+  docbase-network:
+    driver: bridge

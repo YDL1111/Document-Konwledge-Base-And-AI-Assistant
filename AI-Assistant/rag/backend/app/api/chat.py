@@ -153,7 +153,12 @@ async def stream_message(body: ChatRequest, db: Session = Depends(get_db)):
                 if '"type": "done"' in chunk or '"type":"done"' in chunk:
                     try:
                         data = json.loads(chunk.replace("data: ", "").strip())
-                        full_answer = data.get("data", "")
+                        done_data = data.get("data", "")
+                        if isinstance(done_data, dict):
+                            full_answer = done_data.get("answer", "")
+                            final_sources = done_data.get("sources", final_sources)
+                        else:
+                            full_answer = done_data
                     except Exception:
                         pass
                 elif '"type": "sources"' in chunk or '"type":"sources"' in chunk:

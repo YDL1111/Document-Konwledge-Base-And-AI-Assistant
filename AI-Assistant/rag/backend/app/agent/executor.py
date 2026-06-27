@@ -85,6 +85,13 @@ class AgentExecutor:
                 break
 
             # 3. 执行工具调用
+            if tool_name == "search_kb" and kb_context:
+                yield self._sse("step", {
+                    "step": step_num,
+                    "message": "Knowledge context is already available; skipping duplicate search.",
+                })
+                break
+
             tool = self._tools.get(tool_name)
             if tool is None:
                 logger.warning(f"Unknown tool: {tool_name}")
@@ -202,6 +209,20 @@ class AgentExecutor:
                 status = "成功" if r.get("success") else "失败"
                 lines.append(f"- [{r['tool']}] {status}: {r.get('summary', '')}")
             tool_results_text = "\n".join(lines)
+
+        tool_result_rules = (
+            "Tool result interpretation rules:\n"
+            "1. If a Java tool result says 'after applying filters' or 'filtered result set', "
+            "treat the returned rows as already filtered by the Java backend.\n"
+            "2. If the user asks for documents under a category and list_documents_by_category "
+            "was called, answer directly from the returned document IDs and titles.\n"
+            "2a. category_tree_root means the Java backend searched the category and its descendant categories.\n"
+            "3. Do not claim category mapping or category fields are missing when category_id "
+            "or status appears in the tool arguments or summary.\n"
+            "4. For metadata questions, prefer tool results over assumptions from knowledge-base retrieval.\n"
+        )
+        if tool_results:
+            tool_results_text = f"{tool_result_rules}\n{tool_results_text}"
 
         # 构建系统提示
         # kb_context 已在 SearchKBTool 中通过 _build_context 按 MAX_CONTEXT_LENGTH 截断

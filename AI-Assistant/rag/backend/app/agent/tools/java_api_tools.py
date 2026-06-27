@@ -396,12 +396,23 @@ class ListDocumentsByCategoryTool(BaseTool):
             detail_lines = [
                 (
                     f"[{doc['document_id']}] {doc['title']} "
+                    f"category={doc['category_id']} "
                     f"status={doc['status_text']} visibility={doc['visibility_text']} "
                     f"version={doc['current_version_no'] or '-'} aiImport={doc['has_ai_import']}"
                 )
                 for doc in documents[:8]
             ]
-            summary = f"Found {page.get('total', 0)} documents. Status distribution: {stats}."
+            filter_parts = []
+            if category_id is not None:
+                filter_parts.append(f"category_tree_root={category_id} (includes descendant categories)")
+            if status is not None:
+                filter_parts.append(f"status={_status_text(status, status_map)}")
+            filter_text = ", ".join(filter_parts) if filter_parts else "no explicit filters"
+            summary = (
+                f"Found {page.get('total', 0)} documents after applying filters ({filter_text}). "
+                f"These returned rows are the filtered result set from Java. "
+                f"Status distribution: {stats}."
+            )
             if detail_lines:
                 summary += " " + " | ".join(detail_lines)
 

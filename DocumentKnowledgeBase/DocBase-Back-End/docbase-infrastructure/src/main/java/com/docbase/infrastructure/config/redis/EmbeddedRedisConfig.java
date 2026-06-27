@@ -14,7 +14,7 @@ import redis.embedded.RedisServer;
 @ConditionalOnExpression("'${docbase.embedded.redis}' == 'true'")
 public class EmbeddedRedisConfig {
 
-    @Value("${spring.redis.port}")
+    @Value("${spring.data.redis.port}")
     private Integer port;
 
     private RedisServer redisServer;

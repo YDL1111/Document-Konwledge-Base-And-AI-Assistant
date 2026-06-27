@@ -1,15 +1,21 @@
 package com.docbase.common.utils.i18n;
 
-import cn.hutool.extra.spring.SpringUtil;
+import org.springframework.beans.BeansException;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.stereotype.Component;
 
 /**
  * 获取i18n资源文件
  *
  * @author valarchie
  */
-public class MessageUtils {
+@Component
+public class MessageUtils implements ApplicationContextAware {
+
+    private static MessageSource messageSource;
 
     private MessageUtils() {
     }
@@ -22,7 +28,14 @@ public class MessageUtils {
      * @return 获取国际化翻译值
      */
     public static String message(String code, Object... args) {
-        MessageSource messageSource = SpringUtil.getBean(MessageSource.class);
+        if (messageSource == null) {
+            return code;
+        }
         return messageSource.getMessage(code, args, LocaleContextHolder.getLocale());
+    }
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        messageSource = applicationContext.getBean(MessageSource.class);
     }
 }

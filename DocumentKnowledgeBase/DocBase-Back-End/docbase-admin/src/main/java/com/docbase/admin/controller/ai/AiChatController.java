@@ -35,6 +35,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,7 +47,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @Tag(name = "AI Chat API", description = "AI chat session endpoints")
 @RestController
@@ -94,23 +97,29 @@ public class AiChatController extends BaseController {
 
     @Operation(summary = "Stream AI chat response")
     @PreAuthorize("@permission.has('ai:chat:query')")
-    @PostMapping("/stream")
-    public SseEmitter stream(@RequestBody AiChatQueryRequest request,
-                             HttpServletResponse response) {
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<StreamingResponseBody> stream(@RequestBody AiChatQueryRequest request) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
-        return aiChatApplicationService.streamQuery(request, loginUser, response);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .cacheControl(CacheControl.noCache())
+                .header("X-Accel-Buffering", "no")
+                .body(aiChatApplicationService.streamQueryBody(request, loginUser));
     }
 
     @Operation(summary = "Stream AI Agent chat response (with tool calling)")
     @PreAuthorize("@permission.has('ai:chat:query')")
-    @PostMapping("/agent/stream")
-    public SseEmitter agentStream(@RequestBody AiChatQueryRequest request,
-                                   HttpServletResponse response) {
+    @PostMapping(value = "/agent/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<StreamingResponseBody> agentStream(@RequestBody AiChatQueryRequest request) {
         SystemLoginUser loginUser = AuthenticationUtils.getSystemLoginUser();
         if (!loginUser.isAdmin()) {
             throw new ApiException(ErrorCode.Business.PERMISSION_NOT_ALLOWED_TO_OPERATE);
         }
-        return aiChatApplicationService.streamAgentQuery(request, loginUser, response);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .cacheControl(CacheControl.noCache())
+                .header("X-Accel-Buffering", "no")
+                .body(aiChatApplicationService.streamAgentQueryBody(request, loginUser));
     }
 
     // ---- Agent 只读工具接口（供 Python Agent HTTP 调用，权限与 ai:chat:list 对齐） ----

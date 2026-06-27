@@ -30,6 +30,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,6 +49,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -215,6 +217,60 @@ public class AiChatApplicationService {
         streamThread.start();
 
         return emitter;
+    }
+
+    public StreamingResponseBody streamQueryBody(AiChatQueryRequest request, SystemLoginUser loginUser) {
+        Integer kbId = resolveKbId(request);
+        AiChatSessionEntity session = findOrCreateSession(request, loginUser);
+        Integer pythonConvId = session.getPythonConvId();
+        List<Integer> visibleDocIds = resolveVisiblePythonDocIds(request, kbId, loginUser);
+
+        saveUserMessage(session, request, kbId, loginUser);
+
+        PythonChatRequest pythonRequest = PythonChatRequest.builder()
+                .kbId(kbId)
+                .convId(pythonConvId)
+                .question(request.getQuestion())
+                .stream(true)
+                .visibleDocIds(visibleDocIds)
+                .build();
+
+        return outputStream -> {
+            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                    loginUser,
+                    null,
+                    loginUser.getAuthorities());
+            SecurityContextHolder.getContext().setAuthentication(authToken);
+            StringBuilder answerBuilder = new StringBuilder();
+            List<AiChatAnswerDTO.SourceInfo> finalSources = new ArrayList<>();
+
+            try {
+                writeStreamEvent(outputStream, "conv_id", session.getSessionId());
+                pythonAiClient.streamMessage(pythonRequest, line -> {
+                    try {
+                        handlePythonStreamLine(line, session, outputStream, answerBuilder, finalSources);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                updateSessionAfterQuery(session, request.getQuestion());
+                saveAssistantStreamMessage(session, kbId, answerBuilder.toString(), finalSources);
+                writeStreamEvent(outputStream, "done",
+                        Map.of("answer", answerBuilder.toString(), "sources", finalSources));
+            } catch (Exception e) {
+                log.error("AI stream query failed: sessionId={}", session.getSessionId(), e);
+                saveAssistantErrorMessage(session, kbId, e);
+                try {
+                    writeStreamEvent(outputStream, "error",
+                            e.getMessage() != null ? e.getMessage() : DEFAULT_STREAM_ERROR_MESSAGE);
+                } catch (IOException ignored) {
+                    log.warn("Failed to send stream error event");
+                }
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
     }
 
     private List<Integer> resolveVisiblePythonDocIds(AiChatQueryRequest request, Integer kbId,
@@ -712,6 +768,60 @@ public class AiChatApplicationService {
         }
     }
 
+    private void handlePythonStreamLine(String line,
+            AiChatSessionEntity session,
+            OutputStream outputStream,
+            StringBuilder answerBuilder,
+            List<AiChatAnswerDTO.SourceInfo> finalSources) throws IOException {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+
+        String json = extractSseData(line);
+        if (json == null || json.isBlank()) {
+            return;
+        }
+
+        AiChatStreamEventDTO event = objectMapper.readValue(json, AiChatStreamEventDTO.class);
+        if (event == null || event.getType() == null) {
+            return;
+        }
+
+        switch (event.getType()) {
+            case "token" -> {
+                String token = event.getData() != null ? String.valueOf(event.getData()) : "";
+                answerBuilder.append(token);
+                writeStreamEvent(outputStream, "token", token);
+            }
+            case "sources" -> {
+                List<AiChatAnswerDTO.SourceInfo> sources = objectMapper.convertValue(
+                        event.getData(),
+                        new TypeReference<List<AiChatAnswerDTO.SourceInfo>>() {});
+                finalSources.clear();
+                finalSources.addAll(sources);
+                writeStreamEvent(outputStream, "sources", sources);
+            }
+            case "conv_id" -> {
+                Integer convId = objectMapper.convertValue(event.getData(), Integer.class);
+                if (convId != null) {
+                    session.setPythonConvId(convId);
+                    aiChatSessionService.updateById(session);
+                    writeStreamEvent(outputStream, "python_conv_id", convId);
+                }
+            }
+            case "error" -> {
+                String error = event.getData() != null
+                        ? String.valueOf(event.getData())
+                        : DEFAULT_STREAM_ERROR_MESSAGE;
+                writeStreamEvent(outputStream, "error", error);
+                throw new IOException(error);
+            }
+            default -> {
+                // Ignore done/unknown events from Python; Java emits final done after persistence.
+            }
+        }
+    }
+
     private String extractSseData(String eventBlock) {
         StringBuilder builder = new StringBuilder();
         String[] lines = eventBlock.split("\\R");
@@ -742,11 +852,15 @@ public class AiChatApplicationService {
                 .data(data)
                 .build());
         emitter.send(SseEmitter.event().data(json));
-        try {
-            response.flushBuffer();
-        } catch (IllegalStateException ignored) {
-            // response already committed
-        }
+    }
+
+    private void writeStreamEvent(OutputStream outputStream, String type, Object data) throws IOException {
+        String json = objectMapper.writeValueAsString(AiChatStreamEventDTO.builder()
+                .type(type)
+                .data(data)
+                .build());
+        outputStream.write(("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8));
+        outputStream.flush();
     }
 
     public SseEmitter streamAgentQuery(AiChatQueryRequest request, SystemLoginUser loginUser,
@@ -810,6 +924,117 @@ public class AiChatApplicationService {
         streamThread.start();
 
         return emitter;
+    }
+
+    public StreamingResponseBody streamAgentQueryBody(AiChatQueryRequest request, SystemLoginUser loginUser) {
+        Integer kbId = resolveKbId(request);
+        AiChatSessionEntity session = findOrCreateSession(request, loginUser);
+        Integer pythonConvId = session.getPythonConvId();
+        List<Integer> visibleDocIds = resolveVisiblePythonDocIds(request, kbId, loginUser);
+
+        saveUserMessage(session, request, kbId, loginUser);
+
+        PythonChatRequest pythonRequest = PythonChatRequest.builder()
+                .kbId(kbId)
+                .convId(pythonConvId)
+                .question(request.getQuestion())
+                .stream(true)
+                .visibleDocIds(visibleDocIds)
+                .build();
+
+        return outputStream -> {
+            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                    loginUser,
+                    null,
+                    loginUser.getAuthorities());
+            SecurityContextHolder.getContext().setAuthentication(authToken);
+            StringBuilder answerBuilder = new StringBuilder();
+            List<AiChatAnswerDTO.SourceInfo> finalSources = new ArrayList<>();
+            boolean pythonDoneForwarded = false;
+
+            try {
+                writeStreamEvent(outputStream, "conv_id", session.getSessionId());
+                pythonAiClient.streamAgentMessage(pythonRequest, line -> {
+                    try {
+                        handleAgentStreamLine(line, session, outputStream, answerBuilder, finalSources);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                updateSessionAfterQuery(session, request.getQuestion());
+                saveAssistantStreamMessage(session, kbId, answerBuilder.toString(), finalSources);
+                writeStreamEvent(outputStream, "done",
+                        Map.of("answer", answerBuilder.toString(), "sources", finalSources));
+            } catch (Exception e) {
+                log.error("AI Agent stream query failed: sessionId={}", session.getSessionId(), e);
+                saveAssistantErrorMessage(session, kbId, e);
+                try {
+                    writeStreamEvent(outputStream, "error",
+                            e.getMessage() != null ? e.getMessage() : DEFAULT_STREAM_ERROR_MESSAGE);
+                } catch (IOException ignored) {
+                    log.warn("Failed to send Agent stream error event");
+                }
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
+    }
+
+    private void handleAgentStreamLine(String line,
+            AiChatSessionEntity session,
+            OutputStream outputStream,
+            StringBuilder answerBuilder,
+            List<AiChatAnswerDTO.SourceInfo> finalSources) throws IOException {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+
+        String json = extractSseData(line);
+        if (json == null || json.isBlank()) {
+            return;
+        }
+
+        AiChatStreamEventDTO event = objectMapper.readValue(json, AiChatStreamEventDTO.class);
+        if (event == null || event.getType() == null) {
+            return;
+        }
+
+        switch (event.getType()) {
+            case "token" -> {
+                String token = event.getData() != null ? String.valueOf(event.getData()) : "";
+                answerBuilder.append(token);
+                writeStreamEvent(outputStream, "token", token);
+            }
+            case "sources" -> {
+                List<AiChatAnswerDTO.SourceInfo> sources = objectMapper.convertValue(
+                        event.getData(),
+                        new TypeReference<List<AiChatAnswerDTO.SourceInfo>>() {});
+                finalSources.clear();
+                finalSources.addAll(sources);
+                writeStreamEvent(outputStream, "sources", sources);
+            }
+            case "conv_id" -> {
+                Integer convId = objectMapper.convertValue(event.getData(), Integer.class);
+                if (convId != null) {
+                    session.setPythonConvId(convId);
+                    aiChatSessionService.updateById(session);
+                    writeStreamEvent(outputStream, "python_conv_id", convId);
+                }
+            }
+            case "error" -> {
+                String error = event.getData() != null
+                        ? String.valueOf(event.getData())
+                        : DEFAULT_STREAM_ERROR_MESSAGE;
+                writeStreamEvent(outputStream, "error", error);
+            }
+            case "start", "step", "tool_call", "tool_result", "done" -> {
+                writeStreamEvent(outputStream, event.getType(), event.getData());
+            }
+            default -> {
+                // Ignore other unknown Agent events.
+            }
+        }
     }
 
     private void handleAgentStreamLine(String line,

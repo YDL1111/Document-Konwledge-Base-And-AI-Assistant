@@ -1,0 +1,88 @@
+# Docker 环境配置
+spring:
+    datasource:
+        type: com.alibaba.druid.pool.DruidDataSource
+        driverClassName: com.mysql.cj.jdbc.Driver
+        druid:
+            webStatFilter:
+                enabled: true
+            statViewServlet:
+                enabled: true
+                allow:
+                url-pattern: /druid/*
+                login-username: docbase
+                login-password: 123456
+            filter:
+                stat:
+                    enabled: true
+                    log-slow-sql: true
+                    slow-sql-millis: 1000
+                    merge-sql: true
+                wall:
+                    config:
+                        multi-statement-allow: true
+        dynamic:
+            primary: master
+            strict: false
+            druid:
+                initialSize: 5
+                minIdle: 10
+                maxActive: 20
+                maxWait: 60000
+                timeBetweenEvictionRunsMillis: 60000
+                minEvictableIdleTimeMillis: 300000
+                maxEvictableIdleTimeMillis: 900000
+                validationQuery: SELECT 1 FROM DUAL
+                testWhileIdle: true
+                testOnBorrow: false
+                testOnReturn: false
+            datasource:
+                master:
+                    url: jdbc:mysql://mysql:3306/docbase_knowledge?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8
+                    username: root
+                    password: 123456
+
+    # redis 配置
+    data:
+        redis:
+            host: redis
+            port: 6379
+            database: 0
+            password:
+            timeout: 10s
+            lettuce:
+                pool:
+                    min-idle: 0
+                    max-idle: 8
+                    max-active: 8
+                    max-wait: -1ms
+
+logging:
+    file:
+        path: /app/logs
+
+springdoc:
+    swagger-ui:
+        enabled: true
+        url: ${docbase.api-prefix}/v3/api-docs
+        config-url: ${docbase.api-prefix}/v3/api-docs/swagger-config
+
+docbase:
+    file-base-dir: /app/docbase-files
+    api-prefix: /dev-api
+    demo-enabled: false
+    ai:
+        python:
+            base-url: http://python-rag-backend:8000
+            api-key: ${DOCBASE_INTERNAL_API_KEY:docbase-agent-dev-key}
+            connect-timeout-ms: 3000
+            read-timeout-ms: 120000
+        kb-mapping:
+            default-kb-id: 5
+            category-mappings:
+                1: 5
+                2: 5
+                6: 5
+                8: 5
+                9: 5
+                10: 5

@@ -362,6 +362,116 @@ pnpm install
 
 ---
 
+## Docker Desktop 部署
+
+如果不想分别启动 MySQL、Redis、Java、前端和 Python，可以使用根目录下的 Docker Compose 一键启动。
+
+### 1. 前置条件
+
+- 已安装并启动 Docker Desktop。
+- Docker Desktop 使用 Linux containers。
+- 本机端口不要被占用：`3080`、`8081`、`8001`、`3307`、`6380`、`3001`。
+- 如果使用 HuggingFace Embedding，请确保本机已有模型缓存，或允许容器联网下载模型。
+
+当前 `docker-compose.yml` 中 Python RAG 默认挂载本机 HuggingFace 缓存：
+
+```yaml
+C:/Users/15567/.cache/huggingface:/root/.cache/huggingface:ro
+```
+
+如果换电脑部署，需要把左侧路径改成新机器上的 HuggingFace 缓存目录；如果没有缓存，导入任务可能会在向量化阶段报 `couldn't connect to https://huggingface.co`。
+
+### 2. 启动命令
+
+在工作区根目录执行：
+
+```bash
+cd D:\ResumeProjects
+set DEEPSEEK_API_KEY=your_deepseek_api_key
+set DOCBASE_INTERNAL_API_KEY=your_internal_agent_api_key
+docker compose build
+docker compose up -d
+```
+
+如果使用 PowerShell，也可以写成：
+
+```powershell
+$env:DEEPSEEK_API_KEY="your_deepseek_api_key"
+$env:DOCBASE_INTERNAL_API_KEY="your_internal_agent_api_key"
+docker compose up -d --build
+```
+
+查看服务状态：
+
+```bash
+docker compose ps
+```
+
+查看日志：
+
+```bash
+docker compose logs -f docbase-backend
+docker compose logs -f python-rag-backend
+docker compose logs -f docbase-frontend
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+如果只修改了 Python RAG 代码，可以只重建 Python 服务：
+
+```bash
+docker compose build python-rag-backend
+docker compose up -d python-rag-backend
+```
+
+### 3. Docker 端口说明
+
+| 服务 | 容器名 | 宿主机访问地址 |
+| --- | --- | --- |
+| DocBase 前端 | `docbase-frontend` | `http://localhost:3080` |
+| Java 后端 | `docbase-backend` | `http://localhost:8081` |
+| Python RAG 后端 | `python-rag-backend` | `http://localhost:8001` |
+| MySQL | `docbase-mysql` | `localhost:3307` |
+| Redis | `docbase-redis` | `localhost:6380` |
+| RAG 独立前端 | `rag-frontend` | `http://localhost:3001` |
+
+日常使用主入口：
+
+```text
+http://localhost:3080
+```
+
+前端通过 Nginx 将 `/dev-api/**` 代理到 Java 后端，因此浏览器里一般访问 `3080` 即可。
+
+### 4. Docker 数据初始化
+
+MySQL 容器首次启动时会加载：
+
+```text
+DocumentKnowledgeBase/DocBase-Back-End/sql
+```
+
+公开仓库建议只保留脱敏后的启动脚本，例如：
+
+```text
+DocumentKnowledgeBase/DocBase-Back-End/sql/docbase_knowledge_public_bootstrap.sql
+```
+
+注意：Docker volume 一旦创建，后续修改 SQL 文件不会自动重新初始化数据库。如果需要用新的 SQL 重建 Docker 数据库，需要先删除旧 volume：
+
+```bash
+docker compose down -v
+docker compose up -d mysql
+```
+
+这会清空 Docker 内的 MySQL、Redis、ChromaDB 等 volume 数据，请只在确认不需要保留 Docker 测试数据时执行。
+
+---
+
 ## 常用开发命令
 
 ### Java

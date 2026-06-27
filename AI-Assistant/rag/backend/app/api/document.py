@@ -146,7 +146,7 @@ def get_doc(doc_id: int, db: Session = Depends(get_db)):
 def delete_doc(doc_id: int, db: Session = Depends(get_db)):
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        return ResponseModel(message="document already deleted")
     doc_service.delete_document(db, doc_id)
     return ResponseModel(message="删除成功")
 

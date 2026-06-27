@@ -76,3 +76,9 @@ AI-Assistant/rag/backend/uploads/
 AI-Assistant/rag/backend/chroma_db/
 AI-Assistant/rag/backend/logs/
 AI-Assistant/rag/backend/venv/
+
+# Local Docker/debug artifacts
+docker-backups/
+DOCKER-DEPLOYMENT.md
+tmp_*.json
+tmp_*.js

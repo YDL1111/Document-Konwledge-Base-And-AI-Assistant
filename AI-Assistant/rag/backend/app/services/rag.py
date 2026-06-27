@@ -280,12 +280,10 @@ class RAGService:
             prompt_tokens_est=len(context) // 2 + len(question) // 2,
         )
 
-        yield f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
-
         if not results:
             message = "根据当前知识库内容，未找到与该问题相关的信息。"
             yield f"data: {json.dumps({'type': 'token', 'data': message}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'data': message}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': {'answer': message, 'sources': []}}, ensure_ascii=False)}\n\n"
             return
 
         llm = self._get_llm(streaming=True)
@@ -299,7 +297,12 @@ class RAGService:
             full_answer += chunk
             yield f"data: {json.dumps({'type': 'token', 'data': chunk}, ensure_ascii=False)}\n\n"
 
-        yield f"data: {json.dumps({'type': 'done', 'data': full_answer}, ensure_ascii=False)}\n\n"
+        if "未找到相关信息" in full_answer:
+            sources = []
+        if sources:
+            yield f"data: {json.dumps({'type': 'sources', 'data': sources}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'data': {'answer': full_answer, 'sources': sources}}, ensure_ascii=False)}\n\n"
 
     def test_connection(self) -> bool:
         try:
