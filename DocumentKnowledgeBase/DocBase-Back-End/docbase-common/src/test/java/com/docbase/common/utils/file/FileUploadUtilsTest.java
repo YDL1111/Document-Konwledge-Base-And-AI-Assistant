@@ -116,4 +116,23 @@ class FileUploadUtilsTest {
 
         Assertions.assertEquals("D:\\agileboot\\profile\\avatar\\test.jpg", fileAbsolutePath);
     }
+
+    @Test
+    void getFileAbsolutePathByStoragePath() {
+        DocBaseConfig agileBootConfig = new DocBaseConfig();
+        agileBootConfig.setFileBaseDir("D:\\agileboot");
+
+        String fileAbsolutePath =
+            FileUploadUtils.getFileAbsolutePathByStoragePath("/profile/document/test.pdf");
+
+        Assertions.assertEquals("D:\\agileboot\\profile\\document\\test.pdf", fileAbsolutePath);
+    }
+
+    @Test
+    void getFileAbsolutePathByStoragePathRejectsTraversal() {
+        ApiException exception = Assertions.assertThrows(ApiException.class,
+            () -> FileUploadUtils.getFileAbsolutePathByStoragePath("/profile/document/../secret.txt"));
+
+        Assertions.assertEquals(Internal.INVALID_PARAMETER, exception.getErrorCode());
+    }
 }

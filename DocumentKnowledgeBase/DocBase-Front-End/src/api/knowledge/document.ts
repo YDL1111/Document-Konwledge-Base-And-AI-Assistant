@@ -105,6 +105,17 @@ export const getKnowledgeDocumentPreviewApi = (documentId: number) => {
   );
 };
 
+export const getKnowledgeDocumentPreviewStreamApi = (documentId: number) => {
+  return http.request<Blob>(
+    "get",
+    `/knowledge/documents/${documentId}/preview/stream`,
+    undefined,
+    {
+      responseType: "blob"
+    }
+  );
+};
+
 export const addKnowledgeDocumentApi = (
   data: KnowledgeDocumentAddRequest,
   file: File

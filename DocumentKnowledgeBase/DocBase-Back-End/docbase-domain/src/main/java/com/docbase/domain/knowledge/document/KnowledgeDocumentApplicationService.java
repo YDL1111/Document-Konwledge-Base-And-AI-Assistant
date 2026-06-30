@@ -39,6 +39,11 @@ import com.docbase.infrastructure.user.AuthenticationUtils;
 import com.docbase.infrastructure.user.web.DataScopeEnum;
 import com.docbase.infrastructure.user.web.SystemLoginUser;
 import java.io.File;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -196,7 +201,7 @@ public class KnowledgeDocumentApplicationService {
             throw new ApiException(ErrorCode.Business.COMMON_FILE_NOT_ALLOWED_TO_DOWNLOAD, storedFileName);
         }
 
-        String filePath = FileUploadUtils.getFileAbsolutePath(UploadSubDir.DOCUMENT_PATH, storedFileName);
+        String filePath = FileUploadUtils.getFileAbsolutePathByStoragePath(currentVersion.getStoragePath());
         if (!FileUtil.exist(filePath)) {
             throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, storedFileName, "文档文件");
         }
@@ -220,7 +225,7 @@ public class KnowledgeDocumentApplicationService {
             getCurrentVersionEntity(documentId, currentUserId, currentDeptId, isAdmin);
 
         String storedFileName = FileNameUtil.getName(currentVersion.getStoragePath());
-        String filePath = FileUploadUtils.getFileAbsolutePath(UploadSubDir.DOCUMENT_PATH, storedFileName);
+        String filePath = FileUploadUtils.getFileAbsolutePathByStoragePath(currentVersion.getStoragePath());
         if (!FileUtil.exist(filePath)) {
             throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND, storedFileName, "文档文件");
         }
@@ -241,7 +246,11 @@ public class KnowledgeDocumentApplicationService {
         MediaType mediaType = resolvePreviewMediaType(fileExt);
         headers.setContentType(mediaType);
 
-        return new ResponseEntity<>(FileUtil.readBytes(new File(filePath)), headers, HttpStatus.OK);
+        byte[] fileBytes = FileUtil.readBytes(new File(filePath));
+        if (isTextPreviewFile(fileExt)) {
+            fileBytes = normalizeTextPreviewBytes(fileBytes);
+        }
+        return new ResponseEntity<>(fileBytes, headers, HttpStatus.OK);
     }
 
     /**
@@ -271,6 +280,55 @@ public class KnowledgeDocumentApplicationService {
                     "vnd.openxmlformats-officedocument.presentationml.presentation");
             default     -> MediaType.APPLICATION_OCTET_STREAM;
         };
+    }
+
+    private boolean isTextPreviewFile(String fileExt) {
+        if (fileExt == null) {
+            return false;
+        }
+        return switch (fileExt) {
+            case "txt", "log", "csv", "md", "java", "py", "xml", "json", "yaml", "yml",
+                 "properties", "sql", "html", "htm", "css", "js", "ts", "sh", "bat" -> true;
+            default -> false;
+        };
+    }
+
+    private byte[] normalizeTextPreviewBytes(byte[] bytes) {
+        if (bytes.length >= 3
+            && (bytes[0] & 0xFF) == 0xEF
+            && (bytes[1] & 0xFF) == 0xBB
+            && (bytes[2] & 0xFF) == 0xBF) {
+            return new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8)
+                .getBytes(StandardCharsets.UTF_8);
+        }
+        if (bytes.length >= 2
+            && (bytes[0] & 0xFF) == 0xFF
+            && (bytes[1] & 0xFF) == 0xFE) {
+            return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_16LE)
+                .getBytes(StandardCharsets.UTF_8);
+        }
+        if (bytes.length >= 2
+            && (bytes[0] & 0xFF) == 0xFE
+            && (bytes[1] & 0xFF) == 0xFF) {
+            return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_16BE)
+                .getBytes(StandardCharsets.UTF_8);
+        }
+        if (isValidUtf8(bytes)) {
+            return bytes;
+        }
+        return new String(bytes, Charset.forName("GBK")).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean isValidUtf8(byte[] bytes) {
+        try {
+            StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes));
+            return true;
+        } catch (CharacterCodingException e) {
+            return false;
+        }
     }
 
     private KnowledgeDocumentEntity getAccessibleDocument(Long documentId,

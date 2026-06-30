@@ -551,7 +551,6 @@ VALUES
 (135,'Document Download',3,'',103,'',1,'knowledge:document:download','{}',1,'',1,NOW(),1,NOW(),0),
 (136,'Document Ingest',3,'',103,'',1,'knowledge:document:ingest','{}',1,'',1,NOW(),1,NOW(),0),
 (137,'Document Rollback',3,'',103,'',1,'knowledge:document:rollback','{}',1,'',1,NOW(),1,NOW(),0),
-(138,'Document Add',3,'',103,'',1,'knowledge:document:add','{}',1,'',1,NOW(),1,NOW(),0),
 (139,'Document Audit',3,'',103,'',1,'knowledge:document:audit','{}',1,'',1,NOW(),1,NOW(),0),
 (140,'Ingest Query',3,'',104,'',1,'knowledge:ingest:query','{}',1,'',1,NOW(),1,NOW(),0),
 (141,'Ingest Retry',3,'',104,'',1,'knowledge:ingest:retry','{}',1,'',1,NOW(),1,NOW(),0),

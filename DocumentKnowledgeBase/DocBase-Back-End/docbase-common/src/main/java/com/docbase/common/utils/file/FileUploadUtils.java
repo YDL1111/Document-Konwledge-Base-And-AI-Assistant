@@ -140,4 +140,30 @@ public class FileUploadUtils {
     public static String getFileAbsolutePath(String subDir, String fileName) {
         return DocBaseConfig.getFileBaseDir() + File.separator + subDir + File.separator + fileName;
     }
+
+    public static String getFileAbsolutePathByStoragePath(String storagePath) {
+        if (StrUtil.isBlank(storagePath)) {
+            throw new ApiException(Internal.INVALID_PARAMETER, "storagePath");
+        }
+
+        String normalized = storagePath.replace("\\", "/");
+        String resourcePrefix = "/" + Constants.RESOURCE_PREFIX + "/";
+        int resourceIndex = normalized.indexOf(resourcePrefix);
+        if (resourceIndex >= 0) {
+            normalized = normalized.substring(resourceIndex + resourcePrefix.length());
+        } else if (normalized.startsWith(Constants.RESOURCE_PREFIX + "/")) {
+            normalized = normalized.substring(Constants.RESOURCE_PREFIX.length() + 1);
+        } else {
+            normalized = StrUtil.removePrefix(normalized, "/");
+        }
+
+        Path relativePath = Paths.get(normalized).normalize();
+        String relative = relativePath.toString();
+        String relativeForCheck = relative.replace("\\", "/");
+        if (relativeForCheck.startsWith("../") || relativeForCheck.contains("/../")
+            || relativePath.isAbsolute()) {
+            throw new ApiException(Internal.INVALID_PARAMETER, "storagePath");
+        }
+        return DocBaseConfig.getFileBaseDir() + File.separator + relative;
+    }
 }

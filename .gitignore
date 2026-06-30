@@ -29,6 +29,7 @@ wheels/
 
 # Node.js
 node_modules/
+.pnpm-store/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -82,3 +83,6 @@ docker-backups/
 DOCKER-DEPLOYMENT.md
 tmp_*.json
 tmp_*.js
+
+# Local/private interview notes
+docs/项目深挖面试题-参考答案.md

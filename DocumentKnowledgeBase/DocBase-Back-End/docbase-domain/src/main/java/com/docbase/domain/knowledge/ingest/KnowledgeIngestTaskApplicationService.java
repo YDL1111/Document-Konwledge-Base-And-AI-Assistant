@@ -182,7 +182,7 @@ public class KnowledgeIngestTaskApplicationService {
             }
 
             String storedFileName = FileNameUtil.getName(version.getStoragePath());
-            String filePath = FileUploadUtils.getFileAbsolutePath(UploadSubDir.DOCUMENT_PATH, storedFileName);
+            String filePath = FileUploadUtils.getFileAbsolutePathByStoragePath(version.getStoragePath());
             if (!FileUtil.exist(filePath)) {
                 throw new ApiException(ErrorCode.Business.COMMON_OBJECT_NOT_FOUND,
                         storedFileName, "文档文件");

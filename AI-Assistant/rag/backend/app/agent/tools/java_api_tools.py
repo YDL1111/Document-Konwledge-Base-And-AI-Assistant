@@ -11,7 +11,11 @@ from app.agent.tools.base import BaseTool
 from app.core.config import settings
 
 
-JAVA_BASE_URL = getattr(settings, "JAVA_BASE_URL", "http://localhost:8080")
+JAVA_BASE_URL = (
+    getattr(settings, "JAVA_BASE_URL", "")
+    or getattr(settings, "JAVA_API_BASE_URL", "")
+    or "http://localhost:8080"
+)
 JAVA_API_KEY = getattr(settings, "INTERNAL_API_KEY", "") or getattr(
     settings, "JAVA_API_KEY", ""
 )

@@ -20,7 +20,7 @@ import {
   getKnowledgeDocumentDetailApi,
   getKnowledgeDocumentDownloadUrl,
   getKnowledgeDocumentListApi,
-  getKnowledgeDocumentPreviewApi,
+  getKnowledgeDocumentPreviewStreamApi,
   updateKnowledgeDocumentApi,
   type KnowledgeDocumentAuditRequest,
   type KnowledgeDocumentDTO,
@@ -368,18 +368,98 @@ async function submitAudit() {
   });
 }
 
+function isTextPreviewExt(fileExt?: string) {
+  if (!fileExt) return false;
+  return [
+    "txt",
+    "log",
+    "csv",
+    "md",
+    "java",
+    "py",
+    "xml",
+    "json",
+    "yaml",
+    "yml",
+    "properties",
+    "sql",
+    "html",
+    "htm",
+    "css",
+    "js",
+    "ts",
+    "sh",
+    "bat"
+  ].includes(fileExt.toLowerCase());
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function openTextPreview(blob: Blob, fileName?: string) {
+  const text = await blob.text();
+  const title = fileName || "Text Preview";
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #f7f8fa;
+      color: #1f2937;
+      font-family: Consolas, "Microsoft YaHei", monospace;
+    }
+    pre {
+      margin: 0 auto;
+      max-width: 1080px;
+      padding: 24px;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.75;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body><pre>${escapeHtml(text)}</pre></body>
+</html>`;
+  const previewBlob = new Blob([html], { type: "text/html;charset=UTF-8" });
+  const previewUrl = URL.createObjectURL(previewBlob);
+  window.open(previewUrl, "_blank");
+  window.setTimeout(() => URL.revokeObjectURL(previewUrl), 60_000);
+}
+
 async function previewCurrentDocument() {
   if (!detailData.value?.documentId) {
     message("当前文档信息不完整", { type: "warning" });
     return;
   }
   try {
-    const { data } = await getKnowledgeDocumentPreviewApi(detailData.value.documentId);
-    if (!data) {
-      message("当前文档暂无可预览地址", { type: "warning" });
+    const data = await getKnowledgeDocumentPreviewStreamApi(
+      detailData.value.documentId
+    );
+    if (!data || data.size === 0) {
+      message("当前文档暂无可预览文件", { type: "warning" });
       return;
     }
-    window.open(data, "_blank");
+    if (isTextPreviewExt(detailData.value.currentVersion?.fileExt)) {
+      await openTextPreview(data, detailData.value.currentVersion?.fileName);
+      return;
+    }
+    const previewUrl = URL.createObjectURL(data);
+    window.open(previewUrl, "_blank");
+    window.setTimeout(() => URL.revokeObjectURL(previewUrl), 60_000);
   } catch (error) {
     console.error(error);
     message("文档预览失败，请检查后端接口日志", { type: "error" });

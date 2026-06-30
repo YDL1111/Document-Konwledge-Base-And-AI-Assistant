@@ -77,6 +77,7 @@ services:
     environment:
       DATABASE_URL: mysql+pymysql://root:123456@mysql:3306/docbase_knowledge
       JAVA_API_BASE_URL: http://docbase-backend:8080
+      JAVA_BASE_URL: http://docbase-backend:8080
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-replace_with_your_deepseek_api_key}
       JAVA_API_KEY: ${DOCBASE_INTERNAL_API_KEY:-docbase-agent-dev-key}
       INTERNAL_API_KEY: ${DOCBASE_INTERNAL_API_KEY:-docbase-agent-dev-key}

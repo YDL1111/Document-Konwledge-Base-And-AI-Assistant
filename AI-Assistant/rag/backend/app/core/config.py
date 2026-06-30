@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     EMBED_BATCH_SIZE: int = 20
 
     JAVA_BASE_URL: str = "http://localhost:8080"
+    JAVA_API_BASE_URL: str = ""
     JAVA_API_KEY: str = ""
     INTERNAL_API_KEY: str = ""
 

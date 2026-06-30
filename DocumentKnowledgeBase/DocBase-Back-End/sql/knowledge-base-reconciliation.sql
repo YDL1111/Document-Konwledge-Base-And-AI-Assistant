@@ -73,7 +73,6 @@ VALUES
 (135, '文档下载', 3, '', 103, '', 1, 'knowledge:document:download', '{}', 1, '文档下载按钮',     1, NOW(), 1, NOW(), 0),
 (136, '提交导入', 3, '', 103, '', 1, 'knowledge:document:ingest',   '{}', 1, '文档提交导入按钮', 1, NOW(), 1, NOW(), 0),
 (137, '版本回滚', 3, '', 103, '', 1, 'knowledge:document:rollback', '{}', 1, '文档版本回滚按钮', 1, NOW(), 1, NOW(), 0),
-(138, '新增文档', 3, '', 103, '', 1, 'knowledge:document:add',      '{}', 1, '文档新增按钮',     1, NOW(), 1, NOW(), 0),
 (139, '文档审核', 3, '', 103, '', 1, 'knowledge:document:audit',    '{}', 1, '文档审核按钮',     1, NOW(), 1, NOW(), 0),
 
 -- 导入任务按钮 (parent_id=104)
